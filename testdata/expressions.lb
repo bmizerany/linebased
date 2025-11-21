@@ -1,0 +1,165 @@
+# Linebased tests linebased.
+#
+# This following expressions are proved valid by parsing and interpreting them.
+#
+# The available commands are record, record!, and check.
+#
+#   The record command writes all the expressions in its tail to the record. It
+#   passes the first line of its tail as the name argument to Expressions.
+#
+#   The record! command is record, but prefixes expressions with the string
+#   returned by a call to their Where method.
+#
+#   The check command compares its tail with the record, prints any differences
+#   as test errors. Leading whitespace is removed from the tail before
+#   comparison.
+
+# record runs the expressions in tail and saves their output for comparison
+# with check.
+define record tail
+
+
+# record! runs the expressions in tail, prefixes each output line with its
+# Where information, and saves the result for comparison with check.
+define record! tail
+
+# check compares its tail with the recorded output.
+define check tail
+
+record
+	define echo tail
+	define outer param
+		inner $param
+	define inner param
+		echo $param
+	outer hello
+check
+	echo hello
+
+record
+	define Hello, name
+	define Hi, name
+	define greet name greeting
+		$greeting, $name!
+	greet Alice Hello
+	greet Bob Hi
+check
+	Hello, Alice!
+	Hi, Bob!
+
+record
+	define [ends] tail
+	define showspaces head tail
+		[$head] [$tail]
+	showspaces ends with spaces    
+check
+	[ends] [with spaces    ]
+
+# Normalize whitespace
+record
+	define echo tail
+	echo            Hello
+check
+	echo Hello
+
+# Expression names with spaces can occur in templates. This is less of a
+# feature, more of a side-effect of the way templates are parsed.
+record call name with spaces
+	define call name tail
+		$tail [name]
+	call name with spaces
+check
+	with spaces [name]
+
+record! stack
+	define one
+	define two
+	define three
+	define count
+		one
+		two
+		three
+	count
+check
+	stack:8: count@1> one
+	stack:8: count@2> two
+	stack:8: count@3> three
+
+record empty
+check
+
+## Errors
+
+record definedefine
+	define foo
+		define bar
+	foo
+check
+	definedefine:3: expansion of "foo" contains illegal nested define: "define bar\n"
+
+record badspace
+	# valid line
+	 # illegal whitespace line
+check
+	badspace:2: unexpected whitespace at start of line
+
+record redefine
+	define foo
+		a
+	define foo
+		b
+check
+	redefine:3: template "foo" redefined; previous define: redefine:1
+
+record recursion
+	define foo
+		foo
+	foo
+check
+	recursion:3: foo@1: recursion detected in template foo:
+	    recursion:3: main@3> foo
+	    recursion:3: foo@1> foo
+
+record badcont
+	# begin
+		# continuation line
+	# end
+check
+	badcont:2: unexpected whitespace at start of line
+
+record badargs
+	define foo a b
+		echo $a $b
+	foo x
+check
+	badargs:3: template "foo" expects 2 arguments, got 1
+
+record definenoargs
+	define
+check
+	definenoargs:1: define: missing name argument
+
+record undefined
+	foo
+check
+	foo
+
+record unknownparam
+	define foo a
+		$b
+	foo x
+check
+	unknownparam:1: unknown parameter reference: "b"
+
+record include missing
+	include missingfile.lb
+check
+	include_missing:1: open missingfile.lb: file does not exist
+
+record! include ok
+	include _include.lb
+	foo
+	bar
+check
+	_include.lb:2: foo@1> bar
+	include_ok:3: main@3> bar
