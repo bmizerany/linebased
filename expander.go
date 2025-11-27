@@ -30,7 +30,7 @@ func (e *ExpressionError) Unwrap() error {
 // templates defined in-line. It is analogous to [Decoder] but produces
 // [Expanded] values with template expansion applied.
 //
-// Create an ExpandingDecoder with [NewExpandedDecoder], then call [ExpandingDecoder.Decode]
+// Create an ExpandingDecoder with [NewExpandingDecoder], then call [ExpandingDecoder.Decode]
 // repeatedly until it returns [io.EOF].
 type ExpandingDecoder struct {
 	fsys fs.FS
@@ -60,12 +60,12 @@ type decoderFrame struct {
 	file string
 }
 
-// NewExpandedDecoder creates an ExpandedDecoder that reads from the named file
+// NewExpandingDecoder creates an ExpandedDecoder that reads from the named file
 // in fsys, expanding any templates defined in-line.
 //
 // Expressions with names that do not match a template are passed through as-is.
 // Invalid expansions are reported as [ExpressionError].
-func NewExpandedDecoder(name string, fsys fs.FS) *ExpandingDecoder {
+func NewExpandingDecoder(name string, fsys fs.FS) *ExpandingDecoder {
 	d := &ExpandingDecoder{
 		fsys: fsys,
 		defs: make(map[string]template),

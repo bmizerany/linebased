@@ -305,7 +305,7 @@ func ExampleExpand() {
 		"example.lb": &fstest.MapFile{Data: []byte(script)},
 	}
 
-	d := NewExpandedDecoder("example.lb", f)
+	d := NewExpandingDecoder("example.lb", f)
 	for {
 		expr, err := d.Decode()
 		if err == io.EOF {
@@ -345,7 +345,7 @@ func ExampleExpand_include() {
 		)},
 	}
 
-	d := NewExpandedDecoder("main.lb", fsys)
+	d := NewExpandingDecoder("main.lb", fsys)
 	for {
 		expr, err := d.Decode()
 		if err == io.EOF {
@@ -374,7 +374,7 @@ func TestExpandInclude(t *testing.T) {
 		}
 
 		var got []string
-		d := NewExpandedDecoder("main.lb", fsys)
+		d := NewExpandingDecoder("main.lb", fsys)
 		for {
 			expr, err := d.Decode()
 			if err == io.EOF {
@@ -400,7 +400,7 @@ func TestExpandInclude(t *testing.T) {
 			"main.lb": &fstest.MapFile{Data: []byte("include missing.lb\n")},
 		}
 		var gotErr error
-		d := NewExpandedDecoder("main.lb", fsys)
+		d := NewExpandingDecoder("main.lb", fsys)
 		for {
 			_, err := d.Decode()
 			if err == io.EOF {
@@ -430,7 +430,7 @@ func TestExpandInclude(t *testing.T) {
 			"other.lb": &fstest.MapFile{Data: []byte("include main.lb\n")},
 		}
 		var gotErr error
-		d := NewExpandedDecoder("main.lb", fsys)
+		d := NewExpandingDecoder("main.lb", fsys)
 		for {
 			_, err := d.Decode()
 			if err == io.EOF {
@@ -491,7 +491,7 @@ func TestExpandingDecoder(t *testing.T) {
 			continue // skip files starting with _
 		}
 		t.Run(filepath.Base(file), func(t *testing.T) {
-			d := NewExpandedDecoder(file, scripts)
+			d := NewExpandingDecoder(file, scripts)
 
 			next := func() Expanded {
 				for {
@@ -538,7 +538,7 @@ func TestExpandingDecoder(t *testing.T) {
 				}
 				maps.Copy(fsys, includes)
 
-				d := NewExpandedDecoder(name, fsys)
+				d := NewExpandingDecoder(name, fsys)
 				for {
 					expr, err := d.Decode()
 					if err == io.EOF {
