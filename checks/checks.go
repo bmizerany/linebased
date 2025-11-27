@@ -15,14 +15,18 @@
 package checks
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"blake.io/linebased"
+	"github.com/ericchiang/css"
+	"golang.org/x/net/html"
 )
 
 // JSON checks a JSON value at an RFC 6901 pointer path.
@@ -111,6 +115,87 @@ func jsonFind(body string, target jsontext.Pointer) (string, error) {
 			}
 		}
 	}
+}
+
+// HTML checks the inner HTML of elements matching a CSS selector.
+//
+// It uses [Text] for comparison, supporting operators
+// like ==, !=, ~, !~, contains, and !contains.
+//
+// An additional "count" operator compares the number of matched elements
+// against the expected value.
+//
+// The expression body should contain: selector op want.
+// For example:
+//
+//	div.content == Hello World
+//	h1 contains Welcome
+//	ul>li count 5
+//
+// # Selectors
+//
+// Selectors must not contain spaces. CSS provides several combinators
+// that can be used without spaces:
+//
+//   - "parent>child" selects direct children (e.g., "ul>li")
+//   - "a~b" selects siblings of a that are b (general sibling)
+//   - "a+b" selects the immediate sibling b after a (adjacent sibling)
+//   - "a,b" selects elements matching either a or b
+//
+// For descendant selection (which normally uses a space), use the
+// direct child combinator ">" when applicable, or compose multiple checks.
+//
+// # No Match Behavior
+//
+// If no elements match the selector, it returns an error saying
+// "no elements match selector {selector}" (except for count operator,
+// which returns 0 and only errors if the expected count is non-zero).
+//
+// Returns empty string on success, error message on failure.
+func HTML(expr linebased.Expanded, body string) string {
+	selector, op, want := linebased.ParseArgs3(expr.Body)
+	msg, ok := Text(selector, op, "_", want)
+	if !ok && op != "count" {
+		return msg
+	}
+
+	sel, err := css.Parse(selector)
+	if err != nil {
+		return fmt.Sprintf("error parsing selector %q: %v", selector, err)
+	}
+
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		return fmt.Sprintf("error parsing HTML: %v", err)
+	}
+
+	matches := sel.Select(doc)
+
+	if op == "count" {
+		if want == "" {
+			return "count operator requires non-empty want value"
+		}
+		got := strconv.Itoa(len(matches))
+		msg, _ := Text(selector, "==", got, want)
+		return msg
+	}
+
+	if len(matches) == 0 {
+		return fmt.Sprintf("no elements match selector %q", selector)
+	}
+
+	got := innerHTML(matches[0])
+	msg, _ = Text(selector, op, got, want)
+	return msg
+}
+
+// innerHTML returns the inner HTML of a node as a string.
+func innerHTML(n *html.Node) string {
+	var buf bytes.Buffer
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		html.Render(&buf, c)
+	}
+	return buf.String()
 }
 
 // Text compares got against want using the specified operator op
