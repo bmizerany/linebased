@@ -357,6 +357,18 @@ func (s *server) handleDefinition(msg *request) error {
 	if doc == nil {
 		return s.reply(msg.ID, nil)
 	}
+
+	// Check if cursor is on an include path
+	if includePath, ok := doc.includePathAt(p.Position.Line, p.Position.Character); ok {
+		// Resolve include path relative to current file's directory
+		resolvedPath := path.Join(path.Dir(doc.source), includePath)
+		includeURI := "file://" + resolvedPath
+		return s.reply(msg.ID, location{
+			URI:   includeURI,
+			Range: span{0, 0, 0, 0}.toLSP(),
+		})
+	}
+
 	name, _, ok := doc.symbolAt(p.Position.Line, p.Position.Character)
 	if !ok {
 		return s.reply(msg.ID, nil)
@@ -794,6 +806,23 @@ func (d *document) symbolAt(line, char int) (string, span, bool) {
 		}
 	}
 	return "", span{}, false
+}
+
+// includePathAt returns the include path if cursor is on an include statement's path.
+func (d *document) includePathAt(line, char int) (string, bool) {
+	for _, info := range d.exprs {
+		if info.line != line || info.expr.Name != "include" {
+			continue
+		}
+		// Include path starts after "include "
+		start := utf16Len("include ")
+		includePath := strings.TrimSpace(strings.Split(info.expr.Body, "\n")[0])
+		length := utf16Len(includePath)
+		if char >= start && char < start+length {
+			return includePath, true
+		}
+	}
+	return "", false
 }
 
 func (d *document) references(name string, includeDecl bool) []span {
