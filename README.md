@@ -48,8 +48,8 @@ define greet name
 greet Alice
 greet Bob
 
-# Include shared definitions
-include helpers.lb
+# Include shared definitions (extension added automatically)
+include helpers
 ```
 
 ## Documentation

@@ -66,6 +66,31 @@ const initResponse = `{"capabilities": {"hoverProvider": true}}`
 resp := map[string]any{"id": 1, "result": "ok"}
 ```
 
+### Error handling in Go
+
+Use `errors.Is` or `errors.As` for error comparisons instead of direct equality checks.
+This ensures compatibility with wrapped errors.
+
+```go
+// Good
+if errors.Is(err, io.EOF) {
+    // handle EOF
+}
+// Good
+if errors.Is(err, sql.ErrNoRows) {
+    // handle no rows
+}
+
+// Bad
+if err == sql.ErrNoRows {
+    // ...
+}
+// Bad
+if err == io.EOF {
+    // ...
+}
+```
+
 
 
 
@@ -112,6 +137,8 @@ The editing workflow is iterative. You should cycle through these steps until th
 4. **Check for errors**: After every code modification, you MUST call the `go_diagnostics` tool. Pass the paths of the files you have edited. This tool will report any build or analysis errors.
    EXAMPLE: `go_diagnostics({"files":["/path/to/server.go"]})`
 
-5. **Fix errors**: If `go_diagnostics` reports any errors, fix them. The tool may provide suggested quick fixes in the form of diffs. You should review these diffs and apply them if they are correct. Once you've applied a fix, re-run `go_diagnostics` to confirm that the issue is resolved. It is OK to ignore 'hint' or 'info' diagnostics if they are not relevant to the current task. Note that Go diagnostic messages may contain a summary of the source code, which may not match its exact text.
+5. **Fix errors**: If `go_diagnostics` (using severity "hint" or higher) reports any errors, fix them. The tool may provide suggested quick fixes in the form of diffs. You should review these diffs and apply them if they are correct. Once you've applied a fix, re-run `go_diagnostics` to confirm that the issue is resolved. It is OK to ignore 'hint' or 'info' diagnostics if they are not relevant to the current task. Note that Go diagnostic messages may contain a summary of the source code, which may not match its exact text.
 
 6. **Run tests**: Once `go_diagnostics` reports no errors (and ONLY once there are no errors), run the tests for the packages you have changed. You can do this with `go test [packagePath...]`. Don't run `go test ./...` unless the user explicitly requests it, as doing so may slow down the iteration loop.
+
+
