@@ -322,22 +322,22 @@ func findSubstring(s, substr string) bool {
 func TestDefinitionFromInclude(t *testing.T) {
 	// Test that go-to-definition finds templates defined in included files
 	fsys := fstest.MapFS{
-		"lib.lb": &fstest.MapFile{
+		"lib.linebased": &fstest.MapFile{
 			Data: []byte("# Greets someone\ndefine greet name\n\techo Hello, $name!\n"),
 		},
 	}
 
-	// Main file includes lib.lb and uses greet
-	mainText := "include lib.lb\ngreet Alice\n"
+	// Main file includes lib (without extension) and uses greet
+	mainText := "include lib\ngreet Alice\n"
 	doc := newDocumentFS("file:///main.lb", mainText, fsys)
 
-	// Should find greet definition from lib.lb
+	// Should find greet definition from lib.linebased
 	def, ok := doc.defs["greet"]
 	if !ok {
 		t.Fatal("expected greet to be defined (from include)")
 	}
-	if def.uri != "file:///lib.lb" {
-		t.Errorf("greet definition uri: got %q, want %q", def.uri, "file:///lib.lb")
+	if def.uri != "file:///lib.linebased" {
+		t.Errorf("greet definition uri: got %q, want %q", def.uri, "file:///lib.linebased")
 	}
 	if def.line != 1 { // 0-indexed, "define greet" is on line 2 (index 1)
 		t.Errorf("greet definition line: got %d, want 1", def.line)
@@ -350,38 +350,38 @@ func TestDefinitionFromInclude(t *testing.T) {
 func TestNestedIncludes(t *testing.T) {
 	// Test that nested includes are properly resolved
 	fsys := fstest.MapFS{
-		"a.lb": &fstest.MapFile{
-			Data: []byte("include b.lb\n"),
+		"a.linebased": &fstest.MapFile{
+			Data: []byte("include b\n"),
 		},
-		"b.lb": &fstest.MapFile{
+		"b.linebased": &fstest.MapFile{
 			Data: []byte("define nested\n\techo nested!\n"),
 		},
 	}
 
-	mainText := "include a.lb\nnested\n"
+	mainText := "include a\nnested\n"
 	doc := newDocumentFS("file:///main.lb", mainText, fsys)
 
 	def, ok := doc.defs["nested"]
 	if !ok {
 		t.Fatal("expected nested to be defined (from nested include)")
 	}
-	if def.uri != "file:///b.lb" {
-		t.Errorf("nested definition uri: got %q, want %q", def.uri, "file:///b.lb")
+	if def.uri != "file:///b.linebased" {
+		t.Errorf("nested definition uri: got %q, want %q", def.uri, "file:///b.linebased")
 	}
 }
 
 func TestIncludeCycleDetection(t *testing.T) {
 	// Test that include cycles don't cause infinite loops
 	fsys := fstest.MapFS{
-		"a.lb": &fstest.MapFile{
-			Data: []byte("include b.lb\ndefine from_a\n\techo a\n"),
+		"a.linebased": &fstest.MapFile{
+			Data: []byte("include b\ndefine from_a\n\techo a\n"),
 		},
-		"b.lb": &fstest.MapFile{
-			Data: []byte("include a.lb\ndefine from_b\n\techo b\n"),
+		"b.linebased": &fstest.MapFile{
+			Data: []byte("include a\ndefine from_b\n\techo b\n"),
 		},
 	}
 
-	mainText := "include a.lb\n"
+	mainText := "include a\n"
 	doc := newDocumentFS("file:///main.lb", mainText, fsys)
 
 	// Should have definitions from both files despite cycle
@@ -396,13 +396,13 @@ func TestIncludeCycleDetection(t *testing.T) {
 func TestLocalDefOverridesInclude(t *testing.T) {
 	// Test that local definition takes precedence over included definition
 	fsys := fstest.MapFS{
-		"lib.lb": &fstest.MapFile{
+		"lib.linebased": &fstest.MapFile{
 			Data: []byte("define greet\n\techo from lib\n"),
 		},
 	}
 
 	// Local define before include
-	mainText := "define greet\n\techo from main\ninclude lib.lb\n"
+	mainText := "define greet\n\techo from main\ninclude lib\n"
 	doc := newDocumentFS("file:///main.lb", mainText, fsys)
 
 	def, ok := doc.defs["greet"]
@@ -412,5 +412,41 @@ func TestLocalDefOverridesInclude(t *testing.T) {
 	// First definition wins
 	if def.uri != "file:///main.lb" {
 		t.Errorf("greet definition uri: got %q, want %q", def.uri, "file:///main.lb")
+	}
+}
+
+func TestRootedIncludes(t *testing.T) {
+	// Test that include paths are rooted at the filesystem root.
+	// Include paths must be simple names (no slashes) and the .linebased
+	// extension is added automatically.
+	fsys := fstest.MapFS{
+		"utils.linebased": &fstest.MapFile{
+			Data: []byte("include shared\ndefine util_fn\n\thelper\n"),
+		},
+		"shared.linebased": &fstest.MapFile{
+			Data: []byte("define helper\n\techo shared\n"),
+		},
+	}
+
+	// Main file includes utils (simple name, no extension)
+	mainText := "include utils\nutil_fn\n"
+	doc := newDocumentFS("file:///main.lb", mainText, fsys)
+
+	// Should find util_fn from utils.linebased
+	def, ok := doc.defs["util_fn"]
+	if !ok {
+		t.Fatal("expected util_fn to be defined")
+	}
+	if def.uri != "file:///utils.linebased" {
+		t.Errorf("util_fn definition uri: got %q, want %q", def.uri, "file:///utils.linebased")
+	}
+
+	// Should find helper from shared.linebased (included from utils.linebased)
+	def, ok = doc.defs["helper"]
+	if !ok {
+		t.Fatal("expected helper to be defined (from rooted include)")
+	}
+	if def.uri != "file:///shared.linebased" {
+		t.Errorf("helper definition uri: got %q, want %q", def.uri, "file:///shared.linebased")
 	}
 }

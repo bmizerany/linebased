@@ -94,8 +94,12 @@
 //
 // The "include" builtin reads another file and processes it inline:
 //
-//	include helpers.lb
-//	greet World
+//	include helpers
+//	include common
+//
+// Include paths must be simple filenames without directory separators.
+// The ".linebased" extension is added automatically, so "include helpers"
+// opens "helpers.linebased" from the [fs.FS] passed to [NewExpandingDecoder].
 //
 // Included files can define templates used by the including file. Include cycles
 // are detected and reported as errors.
@@ -217,10 +221,11 @@ func (e *Expanded) Where() string {
 	file := cmp.Or(e.File, "<unknown>")
 	frames := e.Stack
 	if len(frames) > 0 {
-		// in an expansion - use the original call line and current template context
+		// in an expansion - use the original call site file/line and current template context
 		bottom := frames[0]
 		caller := frames[len(frames)-1]
-		return fmt.Sprintf("%s:%d: %s@%d", file, bottom.Line, caller.Name, e.Line)
+		callFile := cmp.Or(bottom.File, "<unknown>")
+		return fmt.Sprintf("%s:%d: %s@%d", callFile, bottom.Line, caller.Name, e.Line)
 	} else {
 		return fmt.Sprintf("%s:%[2]d: main@%[2]d", file, e.Line)
 	}

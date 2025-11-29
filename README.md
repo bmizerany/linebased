@@ -48,8 +48,9 @@ define greet name
 greet Alice
 greet Bob
 
-# Include shared definitions
+# Include shared definitions (paths are rooted at the main file's directory)
 include helpers.lb
+include lib/utils.lb
 ```
 
 ## Documentation
