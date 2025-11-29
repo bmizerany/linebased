@@ -129,8 +129,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -367,7 +369,7 @@ func (s *server) handleDefinition(msg *request) error {
 	start := utf16Len("define ")
 	length := utf16Len(name)
 	return s.reply(msg.ID, location{
-		URI:   doc.uri,
+		URI:   def.uri,
 		Range: span{def.line, start, def.line, start + length}.toLSP(),
 	})
 }
@@ -586,6 +588,7 @@ type document struct {
 	exprs  []exprInfo
 	defs   map[string]definition
 	errors []diagError
+	fsys   fs.FS // filesystem for resolving includes (nil uses os.DirFS)
 }
 
 type exprInfo struct {
@@ -595,6 +598,7 @@ type exprInfo struct {
 }
 
 type definition struct {
+	uri    string   // file URI where definition appears
 	doc    string
 	params []string // parameter names
 	line   int      // 0-indexed line of definition
@@ -615,13 +619,17 @@ func (s span) toLSP() lspRange {
 }
 
 func newDocument(uri, text string) *document {
+	return newDocumentFS(uri, text, nil)
+}
+
+func newDocumentFS(uri, text string, fsys fs.FS) *document {
 	source := uri
 	if u, err := url.Parse(uri); err == nil && u.Scheme == "file" {
 		if p, err := url.PathUnescape(u.Path); err == nil && p != "" {
 			source = p
 		}
 	}
-	d := &document{uri: uri, source: source, text: text, defs: make(map[string]definition)}
+	d := &document{uri: uri, source: source, text: text, defs: make(map[string]definition), fsys: fsys}
 	d.parse()
 	return d
 }
@@ -637,46 +645,23 @@ func (d *document) parse() {
 	d.errors = d.errors[:0]
 	clear(d.defs)
 
-	dec := linebased.NewDecoder(strings.NewReader(d.text))
-	for {
-		expr, err := dec.Decode()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			var synErr *linebased.SyntaxError
-			if errors.As(err, &synErr) {
-				d.errors = append(d.errors, diagError{synErr.Line - 1, synErr.Message})
-			}
-			continue
-		}
+	d.parseFile(d.uri, d.source, d.text, nil)
 
-		info := exprInfo{expr: expr, line: expr.Line - 1}
-		if expr.Name == "define" {
-			header, _, _ := strings.Cut(expr.Body, "\n")
-			fields := strings.Fields(header)
-			if len(fields) > 0 {
-				name := fields[0]
-				info.definedName = name
-				if _, exists := d.defs[name]; !exists {
-					d.defs[name] = definition{
-						doc:    formatComment(expr.Comment),
-						params: fields[1:],
-						line:   expr.Line - 1,
-					}
-				}
-			}
-		}
-		d.exprs = append(d.exprs, info)
-	}
-
-	// Check argument counts
+	// Check argument counts and forward references (only for expressions in main file)
 	for _, info := range d.exprs {
 		if info.expr.Name == "" || info.expr.Name == "define" || info.expr.Name == "include" {
 			continue
 		}
 		def, ok := d.defs[info.expr.Name]
 		if !ok {
+			continue
+		}
+		// Only check forward references for definitions in the same file
+		if def.uri == d.uri && def.line > info.line {
+			d.errors = append(d.errors, diagError{
+				line: info.line,
+				msg:  fmt.Sprintf("template %q used before definition on line %d", info.expr.Name, def.line+1),
+			})
 			continue
 		}
 		numParams := len(def.params)
@@ -693,6 +678,102 @@ func (d *document) parse() {
 			})
 		}
 	}
+}
+
+// parseFile parses a file and adds its definitions to d.defs.
+// seen tracks included files to detect cycles.
+func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
+	if seen == nil {
+		seen = make(map[string]bool)
+	}
+	if seen[source] {
+		return // cycle detected, already processed
+	}
+	seen[source] = true
+
+	dec := linebased.NewDecoder(strings.NewReader(text))
+	for {
+		expr, err := dec.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			var synErr *linebased.SyntaxError
+			if errors.As(err, &synErr) {
+				// Only report errors for the main document
+				if uri == d.uri {
+					d.errors = append(d.errors, diagError{synErr.Line - 1, synErr.Message})
+				}
+			}
+			continue
+		}
+
+		// Only track expressions for the main document
+		if uri == d.uri {
+			info := exprInfo{expr: expr, line: expr.Line - 1}
+			if expr.Name == "define" {
+				header, _, _ := strings.Cut(expr.Body, "\n")
+				fields := strings.Fields(header)
+				if len(fields) > 0 {
+					info.definedName = fields[0]
+				}
+			}
+			d.exprs = append(d.exprs, info)
+		}
+
+		if expr.Name == "define" {
+			header, _, _ := strings.Cut(expr.Body, "\n")
+			fields := strings.Fields(header)
+			if len(fields) > 0 {
+				name := fields[0]
+				if _, exists := d.defs[name]; !exists {
+					d.defs[name] = definition{
+						uri:    uri,
+						doc:    formatComment(expr.Comment),
+						params: fields[1:],
+						line:   expr.Line - 1,
+					}
+				}
+			}
+		} else if expr.Name == "include" {
+			includePath := strings.TrimSpace(strings.Split(expr.Body, "\n")[0])
+			if includePath != "" {
+				d.processInclude(uri, source, includePath, seen)
+			}
+		}
+	}
+}
+
+// processInclude reads and parses an included file.
+func (d *document) processInclude(callerURI, callerSource, includePath string, seen map[string]bool) {
+	// Resolve include path relative to the caller's directory
+	var resolvedPath string
+	var includeURI string
+
+	if d.fsys != nil {
+		// Using a custom filesystem (e.g., in tests)
+		resolvedPath = includePath
+		includeURI = "file:///" + includePath
+	} else {
+		// Using real filesystem - resolve relative to caller
+		callerDir := path.Dir(callerSource)
+		resolvedPath = path.Join(callerDir, includePath)
+		includeURI = "file://" + resolvedPath
+	}
+
+	// Read the included file
+	var content []byte
+	var err error
+	if d.fsys != nil {
+		content, err = fs.ReadFile(d.fsys, resolvedPath)
+	} else {
+		content, err = os.ReadFile(resolvedPath)
+	}
+	if err != nil {
+		return // silently ignore missing includes for now
+	}
+
+	d.parseFile(includeURI, resolvedPath, string(content), seen)
 }
 
 func (d *document) symbolAt(line, char int) (string, span, bool) {

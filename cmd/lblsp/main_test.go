@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"testing/fstest"
 )
 
 func TestDocumentParse(t *testing.T) {
@@ -58,6 +59,12 @@ func TestDocumentParse(t *testing.T) {
 			name:     "two params ok",
 			text:     "define add a b\n\tsum\nadd 1 2\n",
 			wantDefs: []string{"add"},
+		},
+		{
+			name:       "used before defined",
+			text:       "foo\n\ndefine foo\n\tbar\n",
+			wantDefs:   []string{"foo"},
+			wantErrors: []string{"template \"foo\" used before definition on line 3"},
 		},
 	}
 
@@ -310,4 +317,100 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestDefinitionFromInclude(t *testing.T) {
+	// Test that go-to-definition finds templates defined in included files
+	fsys := fstest.MapFS{
+		"lib.lb": &fstest.MapFile{
+			Data: []byte("# Greets someone\ndefine greet name\n\techo Hello, $name!\n"),
+		},
+	}
+
+	// Main file includes lib.lb and uses greet
+	mainText := "include lib.lb\ngreet Alice\n"
+	doc := newDocumentFS("file:///main.lb", mainText, fsys)
+
+	// Should find greet definition from lib.lb
+	def, ok := doc.defs["greet"]
+	if !ok {
+		t.Fatal("expected greet to be defined (from include)")
+	}
+	if def.uri != "file:///lib.lb" {
+		t.Errorf("greet definition uri: got %q, want %q", def.uri, "file:///lib.lb")
+	}
+	if def.line != 1 { // 0-indexed, "define greet" is on line 2 (index 1)
+		t.Errorf("greet definition line: got %d, want 1", def.line)
+	}
+	if def.doc != "Greets someone" {
+		t.Errorf("greet definition doc: got %q, want %q", def.doc, "Greets someone")
+	}
+}
+
+func TestNestedIncludes(t *testing.T) {
+	// Test that nested includes are properly resolved
+	fsys := fstest.MapFS{
+		"a.lb": &fstest.MapFile{
+			Data: []byte("include b.lb\n"),
+		},
+		"b.lb": &fstest.MapFile{
+			Data: []byte("define nested\n\techo nested!\n"),
+		},
+	}
+
+	mainText := "include a.lb\nnested\n"
+	doc := newDocumentFS("file:///main.lb", mainText, fsys)
+
+	def, ok := doc.defs["nested"]
+	if !ok {
+		t.Fatal("expected nested to be defined (from nested include)")
+	}
+	if def.uri != "file:///b.lb" {
+		t.Errorf("nested definition uri: got %q, want %q", def.uri, "file:///b.lb")
+	}
+}
+
+func TestIncludeCycleDetection(t *testing.T) {
+	// Test that include cycles don't cause infinite loops
+	fsys := fstest.MapFS{
+		"a.lb": &fstest.MapFile{
+			Data: []byte("include b.lb\ndefine from_a\n\techo a\n"),
+		},
+		"b.lb": &fstest.MapFile{
+			Data: []byte("include a.lb\ndefine from_b\n\techo b\n"),
+		},
+	}
+
+	mainText := "include a.lb\n"
+	doc := newDocumentFS("file:///main.lb", mainText, fsys)
+
+	// Should have definitions from both files despite cycle
+	if _, ok := doc.defs["from_a"]; !ok {
+		t.Error("expected from_a to be defined")
+	}
+	if _, ok := doc.defs["from_b"]; !ok {
+		t.Error("expected from_b to be defined")
+	}
+}
+
+func TestLocalDefOverridesInclude(t *testing.T) {
+	// Test that local definition takes precedence over included definition
+	fsys := fstest.MapFS{
+		"lib.lb": &fstest.MapFile{
+			Data: []byte("define greet\n\techo from lib\n"),
+		},
+	}
+
+	// Local define before include
+	mainText := "define greet\n\techo from main\ninclude lib.lb\n"
+	doc := newDocumentFS("file:///main.lb", mainText, fsys)
+
+	def, ok := doc.defs["greet"]
+	if !ok {
+		t.Fatal("expected greet to be defined")
+	}
+	// First definition wins
+	if def.uri != "file:///main.lb" {
+		t.Errorf("greet definition uri: got %q, want %q", def.uri, "file:///main.lb")
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"slices"
 	"strings"
 )
@@ -161,26 +162,30 @@ func (d *ExpandingDecoder) expand(expr Expanded) (*Expanded, error) {
 		return nil, nil
 
 	case "include":
-		path := ParseArgs(expr.Body, 1).At(0)
-		if path == "" {
+		includePath := ParseArgs(expr.Body, 1).At(0)
+		if includePath == "" {
 			return nil, &ExpressionError{Expanded: expr, Err: errors.New("include: missing filename")}
 		}
 
-		if !d.pushInclude(path) {
+		// Resolve relative to current file's directory
+		currentFile := d.decoderStack[len(d.decoderStack)-1].file
+		includePath = path.Join(path.Dir(currentFile), includePath)
+
+		if !d.pushInclude(includePath) {
 			return nil, &ExpressionError{
 				Expanded: expr,
-				Err:      fmt.Errorf("include cycle detected: %s", d.includeCycle(path)),
+				Err:      fmt.Errorf("include cycle detected: %s", d.includeCycle(includePath)),
 			}
 		}
 
-		f, err := d.fsys.Open(path)
+		f, err := d.fsys.Open(includePath)
 		if err != nil {
 			d.popInclude()
 			return nil, &ExpressionError{Expanded: expr, Err: err}
 		}
 
 		// Push new decoder onto stack.
-		d.decoderStack = append(d.decoderStack, decoderFrame{dec: NewDecoder(f), file: path})
+		d.decoderStack = append(d.decoderStack, decoderFrame{dec: NewDecoder(f), file: includePath})
 		return nil, nil
 
 	case "":
