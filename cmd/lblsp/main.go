@@ -21,7 +21,7 @@ lblsp supports the following LSP features:
 # Editor Setup
 
 lblsp communicates over stdin/stdout using the LSP protocol. Configure your
-editor to run lblsp as the language server for .lb files.
+editor to run lblsp as the language server for .linebased files.
 
 # Vim / Neovim
 
@@ -32,12 +32,12 @@ For syntax highlighting without LSP, copy linebased.vim to your Vim runtime:
 
 Then create ~/.vim/ftdetect/linebased.vim:
 
-	au BufRead,BufNewFile *.lb set filetype=linebased
+	au BufRead,BufNewFile *.linebased set filetype=linebased
 
 Using nvim-lspconfig (Neovim 0.5+), add to your init.lua:
 
 	vim.api.nvim_create_autocmd({'BufRead', 'BufNewFile'}, {
-		pattern = '*.lb',
+		pattern = '*.linebased',
 		callback = function()
 			vim.lsp.start({
 				name = 'lblsp',
@@ -52,7 +52,7 @@ Using coc.nvim, add to coc-settings.json:
 		"languageserver": {
 			"lblsp": {
 				"command": "lblsp",
-				"filetypes": ["lb"],
+				"filetypes": ["linebased"],
 				"rootPatterns": [".git/"]
 			}
 		}
@@ -66,7 +66,7 @@ Create .vscode/settings.json in your workspace:
 		"lsp.servers": {
 			"lblsp": {
 				"command": "lblsp",
-				"filetypes": ["lb"]
+				"filetypes": ["linebased"]
 			}
 		}
 	}
@@ -77,25 +77,25 @@ Or use an extension that supports custom language servers.
 
 Using lsp-mode:
 
-	(add-to-list 'lsp-language-id-configuration '(lb-mode . "lb"))
+	(add-to-list 'lsp-language-id-configuration '(linebased-mode . "linebased"))
 	(lsp-register-client
 		(make-lsp-client
 			:new-connection (lsp-stdio-connection '("lblsp"))
-			:major-modes '(lb-mode)
+			:major-modes '(linebased-mode)
 			:server-id 'lblsp))
 
 Using eglot:
 
-	(add-to-list 'eglot-server-programs '(lb-mode . ("lblsp")))
+	(add-to-list 'eglot-server-programs '(linebased-mode . ("lblsp")))
 
 # Helix
 
 Add to languages.toml:
 
 	[[language]]
-	name = "lb"
-	scope = "source.lb"
-	file-types = ["lb"]
+	name = "linebased"
+	scope = "source.linebased"
+	file-types = ["linebased"]
 	roots = []
 	language-servers = ["lblsp"]
 
@@ -606,8 +606,14 @@ type document struct {
 
 type exprInfo struct {
 	expr        linebased.Expression
-	line        int // 0-indexed
-	definedName string
+	line        int    // 0-indexed
+	definedName string // for define expressions, the template name
+	bodyExprs   []bodyExprInfo // expressions within a define body
+}
+
+type bodyExprInfo struct {
+	name string // command name
+	line int    // 0-indexed document line
 }
 
 type definition struct {
@@ -728,10 +734,29 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 		if uri == d.uri {
 			info := exprInfo{expr: expr, line: expr.Line - 1}
 			if expr.Name == "define" {
-				header, _, _ := strings.Cut(expr.Body, "\n")
+				header, bodyText, _ := strings.Cut(expr.Body, "\n")
 				fields := strings.Fields(header)
 				if len(fields) > 0 {
 					info.definedName = fields[0]
+				}
+				// Parse body expressions for context help
+				if bodyText != "" {
+					bodyDec := linebased.NewDecoder(strings.NewReader(bodyText))
+					for {
+						bodyExpr, err := bodyDec.Decode()
+						if errors.Is(err, io.EOF) {
+							break
+						}
+						if err != nil {
+							break
+						}
+						if bodyExpr.Name != "" {
+							info.bodyExprs = append(info.bodyExprs, bodyExprInfo{
+								name: bodyExpr.Name,
+								line: info.line + bodyExpr.Line, // document line
+							})
+						}
+					}
 				}
 			}
 			d.exprs = append(d.exprs, info)
@@ -790,18 +815,27 @@ func (d *document) processInclude(includePath string, seen map[string]bool) {
 
 func (d *document) symbolAt(line, char int) (string, span, bool) {
 	for _, info := range d.exprs {
-		if info.line != line {
-			continue
+		if info.line == line {
+			nameLen := utf16Len(info.expr.Name)
+			if nameLen > 0 && char < nameLen {
+				return info.expr.Name, span{line, 0, line, nameLen}, true
+			}
+			if info.definedName != "" {
+				start := utf16Len(info.expr.Name) + 1
+				length := utf16Len(info.definedName)
+				if char >= start && char < start+length {
+					return info.definedName, span{line, start, line, start + length}, true
+				}
+			}
 		}
-		nameLen := utf16Len(info.expr.Name)
-		if nameLen > 0 && char < nameLen {
-			return info.expr.Name, span{line, 0, line, nameLen}, true
-		}
-		if info.definedName != "" {
-			start := utf16Len(info.expr.Name) + 1
-			length := utf16Len(info.definedName)
-			if char >= start && char < start+length {
-				return info.definedName, span{line, start, line, start + length}, true
+		// Check body expressions within defines
+		for _, bodyExpr := range info.bodyExprs {
+			if bodyExpr.line == line {
+				// Body lines have a leading tab, so command starts at char 1
+				nameLen := utf16Len(bodyExpr.name)
+				if char >= 1 && char < 1+nameLen {
+					return bodyExpr.name, span{line, 1, line, 1 + nameLen}, true
+				}
 			}
 		}
 	}
@@ -836,6 +870,14 @@ func (d *document) references(name string, includeDecl bool) []span {
 			length := utf16Len(info.definedName)
 			refs = append(refs, span{info.line, start, info.line, start + length})
 		}
+		// Check body expressions within defines
+		for _, bodyExpr := range info.bodyExprs {
+			if bodyExpr.name == name {
+				nameLen := utf16Len(name)
+				// Body lines have a leading tab, so command starts at char 1
+				refs = append(refs, span{bodyExpr.line, 1, bodyExpr.line, 1 + nameLen})
+			}
+		}
 	}
 	return refs
 }
@@ -845,14 +887,11 @@ func (d *document) semanticTokens() []uint32 {
 		tokComment   = 0
 		tokKeyword   = 1
 		tokFunction  = 2
-		tokString    = 3 // template body lines
+		tokString    = 3 // unused, kept for index stability
 		tokParameter = 4
 		tokVariable  = 5 // $VAR/${VAR} expansions
 	)
 	var tokens []semToken
-
-	// Track which lines are template body lines (for string highlighting)
-	templateBodyLines := make(map[int]bool)
 
 	// Comments
 	for i, line := range d.lines {
@@ -875,7 +914,7 @@ func (d *document) semanticTokens() []uint32 {
 		}
 		tokens = append(tokens, semToken{info.line, 0, nameLen, typ})
 
-		// For define: emit template name, parameters, and mark body lines
+		// For define: emit template name, parameters, and parse body as expressions
 		if info.definedName != "" {
 			start := nameLen + 1
 			tokens = append(tokens, semToken{info.line, start, utf16Len(info.definedName), tokFunction})
@@ -893,23 +932,34 @@ func (d *document) semanticTokens() []uint32 {
 					}
 				}
 			}
-			// Mark continuation lines as template body
-			bodyLines := strings.Count(info.expr.Body, "\n")
-			for i := 1; i < bodyLines; i++ {
-				templateBodyLines[info.line+i] = true
-			}
-		}
-	}
 
-	// Template body lines as strings, with variable expansions highlighted
-	for i, line := range d.lines {
-		if templateBodyLines[i] {
-			// Highlight the whole line (after leading tab) as string
-			if len(line) > 0 && line[0] == '\t' {
-				tokens = append(tokens, semToken{i, 1, utf16Len(line) - 1, tokString})
+			// Parse template body as linebased expressions.
+			// The body (after the header line) contains expressions with tabs stripped.
+			_, bodyText, _ := strings.Cut(info.expr.Body, "\n")
+			if bodyText != "" {
+				bodyDec := linebased.NewDecoder(strings.NewReader(bodyText))
+				for {
+					bodyExpr, err := bodyDec.Decode()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						break
+					}
+					if bodyExpr.Name == "" {
+						continue
+					}
+					// bodyExpr.Line is 1-indexed within the body.
+					// Document line = define line + body expression line.
+					docLine := info.line + bodyExpr.Line
+					// Body lines have a leading tab in the document, so offset is 1.
+					tokens = append(tokens, semToken{docLine, 1, utf16Len(bodyExpr.Name), tokFunction})
+					// Scan for variable expansions in the body line
+					if docLine < len(d.lines) {
+						tokens = append(tokens, scanVariables(docLine, d.lines[docLine], tokVariable)...)
+					}
+				}
 			}
-			// Then overlay variable expansions
-			tokens = append(tokens, scanVariables(i, line, tokVariable)...)
 		}
 	}
 
