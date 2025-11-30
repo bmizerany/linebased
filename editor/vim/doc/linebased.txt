@@ -1,0 +1,82 @@
+*linebased.txt*  Linebased file support                        *linebased.vim*
+
+Author:  Blake Mizerany
+License: MIT
+
+INTRODUCTION                                    *linebased*
+
+This plugin provides syntax highlighting for linebased files (*.linebased).
+In Neovim, it also provides LSP integration with lblsp for go-to-definition,
+hover, and other language features.
+
+Linebased is a line-oriented configuration format where each expression has
+a command name and body. Template definitions use `define`, file inclusion
+uses `include`, and template bodies are indented with tabs.
+
+INSTALLATION                                    *linebased-install*
+
+The plugin will prompt to install the lblsp language server on first use if
+it is not found in your PATH. This requires Go to be installed.
+
+To install lblsp manually:
+>
+    go install blake.io/linebased/cmd/lblsp@latest
+<
+MAPPINGS                                        *linebased-mappings*
+
+These mappings are defined buffer-local in Neovim only:
+
+                                                *linebased-gd*
+gd                      Go to definition. Jump to where the template under
+                        the cursor is defined.
+
+                                                *linebased-gD*
+gD                      Go to type definition.
+
+                                                *linebased-K*
+K                       Hover. Show documentation for the template under
+                        the cursor.
+
+For other LSP features like find references, add your own mappings:
+>
+    autocmd FileType linebased nnoremap <buffer> gr :lua vim.lsp.buf.references()<CR>
+<
+
+OPTIONS                                         *linebased-options*
+
+                                                *g:loaded_linebased*
+g:loaded_linebased      Set to 1 to disable the plugin entirely.
+
+HIGHLIGHTING                                    *linebased-highlighting*
+
+The following highlight groups are defined:
+
+linebasedComment        Comments (lines starting with #)
+linebasedDefine         The `define` keyword
+linebasedInclude        The `include` keyword
+linebasedTemplateName   Template names in define statements
+linebasedParameter      Parameters in define statements
+linebasedVariable       Variable expansions ($var, ${var})
+linebasedCommand        Command names
+linebasedContinuation   Body lines (tab-indented)
+
+The LSP provides semantic tokens that may override these groups for more
+context-aware highlighting in template bodies.
+
+                                                *linebased-special*
+Note: Some colorschemes set Special (used for variables) to the same color
+as Normal. If variable expansions are invisible, override it in your vimrc:
+>
+    hi Special guifg=#a3be8c ctermfg=green
+<
+Or for linebased files only:
+>
+    autocmd FileType linebased hi Special guifg=#a3be8c ctermfg=green
+<
+ABOUT                                           *linebased-about*
+
+Grab the latest version or report a bug on GitHub:
+
+https://github.com/bmizerany/linebased
+
+ vim:tw=78:et:ft=help:norl:

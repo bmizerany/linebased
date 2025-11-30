@@ -25,28 +25,19 @@ editor to run lblsp as the language server for .linebased files.
 
 # Vim / Neovim
 
-For syntax highlighting without LSP, copy linebased.vim to your Vim runtime:
+Clone the repository and add the editor/vim directory to your runtimepath.
+In your vimrc or init.vim:
 
-	mkdir -p ~/.vim/syntax
-	cp linebased.vim ~/.vim/syntax/
+	set runtimepath+=~/src/linebased/editor/vim
 
-Then create ~/.vim/ftdetect/linebased.vim:
+Or in init.lua:
 
-	au BufRead,BufNewFile *.linebased set filetype=linebased
+	vim.opt.rtp:append('~/src/linebased/editor/vim')
 
-Using nvim-lspconfig (Neovim 0.5+), add to your init.lua:
+The plugin provides filetype detection, syntax highlighting, and LSP
+integration (Neovim only).
 
-	vim.api.nvim_create_autocmd({'BufRead', 'BufNewFile'}, {
-		pattern = '*.linebased',
-		callback = function()
-			vim.lsp.start({
-				name = 'lblsp',
-				cmd = {'lblsp'},
-			})
-		end,
-	})
-
-Using coc.nvim, add to coc-settings.json:
+Using coc.nvim (alternative to built-in LSP), add to coc-settings.json:
 
 	{
 		"languageserver": {
