@@ -5,13 +5,14 @@ License: MIT
 
 INTRODUCTION                                    *linebased*
 
-This plugin provides syntax highlighting for linebased files (*.linebased).
-In Neovim, it also provides LSP integration with lblsp for go-to-definition,
-hover, and other language features.
+This plugin provides filetype detection and syntax highlighting for linebased
+files (*.linebased). In Neovim, it also provides LSP integration with lblsp
+for go-to-definition, hover, and other language features.
 
 Linebased is a line-oriented configuration format where each expression has
 a command name and body. Template definitions use `define`, file inclusion
-uses `include`, and template bodies are indented with tabs.
+uses `include`, and template bodies are indented with tabs. For more
+information visit https://blake.io/linebased
 
 INSTALLATION                                    *linebased-install*
 
