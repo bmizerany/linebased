@@ -1,5 +1,6 @@
 /*
-Command lblsp is the Language Server Protocol (LSP) server for linebased files.
+Command lblsp provides tooling for linebased files: an LSP server for editor
+integration and an expand subcommand for debugging template expansion.
 
 # Installation
 
@@ -7,9 +8,27 @@ To install the latest version of lblsp, run:
 
 	go install blake.io/linebased/cmd/lblsp@latest
 
-# Supported Features
+# Expand Subcommand
 
-lblsp supports the following LSP features:
+The expand subcommand outputs a linebased file with all templates expanded
+and includes resolved:
+
+	lblsp expand script.linebased
+
+Use the -x flag for shell-style tracing that shows each template call as it
+expands:
+
+	$ lblsp expand -x script.linebased
+	+ script.linebased:7: outer hello
+	++ script.linebased:1: inner hello
+	echo inner: hello
+
+The + signs indicate nesting depth. When outer calls inner which produces echo,
+you see + for outer, ++ for inner, then the final expanded expression.
+
+# LSP Features
+
+When run without arguments, lblsp starts an LSP server with:
 
   - Diagnostics: Syntax errors and argument count validation
   - Hover: Documentation for templates at definition and call sites
@@ -118,12 +137,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,6 +161,17 @@ const (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "expand":
+			if err := runExpand(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "lblsp expand: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	s := &server{
 		r:    bufio.NewReader(os.Stdin),
 		w:    bufio.NewWriter(os.Stdout),
@@ -153,6 +185,67 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lblsp: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runExpand(args []string) error {
+	fs := flag.NewFlagSet("expand", flag.ContinueOnError)
+	trace := fs.Bool("x", false, "print expansion steps to stderr")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		return errors.New("missing filename")
+	}
+	filename := fs.Arg(0)
+
+	// Track last traced stack to avoid duplicate trace lines
+	var lastStack []linebased.Expanded
+
+	// Get absolute path and directory for the filesystem root
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(absPath)
+	base := filepath.Base(absPath)
+
+	fsys := os.DirFS(dir)
+	dec := linebased.NewExpandingDecoder(base, fsys)
+
+	for {
+		expr, err := dec.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		// Output comment if present
+		if expr.Comment != "" {
+			fmt.Print(expr.Comment)
+		}
+
+		// In trace mode, show template calls being expanded (like sh -x)
+		// Only print stack frames that differ from the last traced stack
+		if *trace {
+			for i, caller := range expr.Stack {
+				// Skip if this frame matches the last traced stack
+				if i < len(lastStack) && lastStack[i].Name == caller.Name && lastStack[i].Line == caller.Line {
+					continue
+				}
+				prefix := strings.Repeat("+", i+1)
+				fmt.Fprintf(os.Stderr, "%s %s:%d: %s\n", prefix, caller.File, caller.Line, strings.TrimSuffix(caller.String(), "\n"))
+			}
+			lastStack = expr.Stack
+		}
+
+		// Output expression (including blank lines to preserve structure)
+		fmt.Print(expr.String())
+	}
+
+	return nil
 }
 
 // Server
