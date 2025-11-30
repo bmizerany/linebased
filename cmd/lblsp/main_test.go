@@ -180,7 +180,7 @@ func TestReferencesInTemplateBody(t *testing.T) {
 	if len(refs) != 3 {
 		t.Errorf("references(inner, true): got %d, want 3", len(refs))
 		for _, r := range refs {
-			t.Logf("  line %d, char %d-%d", r.startLine, r.startChar, r.endChar)
+			t.Logf("  line %d, char %d-%d", r.span.startLine, r.span.startChar, r.span.endChar)
 		}
 	}
 
@@ -188,6 +188,44 @@ func TestReferencesInTemplateBody(t *testing.T) {
 	// Should find: call in body on line 1, call on line 4
 	if len(refs) != 2 {
 		t.Errorf("references(inner, false): got %d, want 2", len(refs))
+	}
+}
+
+func TestReferencesAcrossIncludes(t *testing.T) {
+	// Test that references finds calls in main file for templates defined in included files
+	fsys := fstest.MapFS{
+		"lib.linebased": &fstest.MapFile{Data: []byte("define helper\n\techo help\n")},
+	}
+	doc := newDocumentFS("file:///project/main.lb", "include lib\nhelper\n", fsys)
+
+	refs := doc.references("helper", true)
+	// Should find: definition in lib.linebased (line 0), call in main.lb (line 1)
+	if len(refs) != 2 {
+		t.Errorf("references(helper, true): got %d refs, want 2", len(refs))
+		for _, r := range refs {
+			t.Logf("  uri=%s line=%d", r.uri, r.span.startLine)
+		}
+	}
+
+	// Verify we have refs from both files
+	uris := make(map[string]bool)
+	for _, r := range refs {
+		uris[r.uri] = true
+	}
+	if !uris["file:///project/main.lb"] {
+		t.Error("missing reference in main file")
+	}
+	if !uris["file:///project/lib.linebased"] {
+		t.Error("missing reference in included file")
+	}
+
+	// Without declaration, should only find call in main file
+	refs = doc.references("helper", false)
+	if len(refs) != 1 {
+		t.Errorf("references(helper, false): got %d refs, want 1", len(refs))
+	}
+	if len(refs) > 0 && refs[0].uri != "file:///project/main.lb" {
+		t.Errorf("expected ref in main file, got %s", refs[0].uri)
 	}
 }
 

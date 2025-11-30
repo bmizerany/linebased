@@ -536,7 +536,7 @@ func (s *server) handleReferences(msg *request) error {
 	refs := doc.references(name, p.Context.IncludeDeclaration)
 	locs := make([]location, len(refs))
 	for i, ref := range refs {
-		locs[i] = location{URI: doc.uri, Range: ref.toLSP()}
+		locs[i] = location{URI: ref.uri, Range: ref.span.toLSP()}
 	}
 	return s.reply(msg.ID, locs)
 }
@@ -718,15 +718,16 @@ type diagnostic struct {
 // Document
 
 type document struct {
-	uri    string
-	source string // absolute path to the file
-	root   string // root directory for resolving includes
-	text   string
-	lines  []string
-	exprs  []exprInfo
-	defs   map[string]definition
-	errors []diagError
-	fsys   fs.FS // filesystem for resolving includes (nil uses os.DirFS(root))
+	uri          string
+	source       string // absolute path to the file
+	root         string // root directory for resolving includes
+	text         string
+	lines        []string
+	exprs        []exprInfo
+	defs         map[string]definition
+	errors       []diagError
+	fsys         fs.FS                   // filesystem for resolving includes (nil uses os.DirFS(root))
+	includedExpr map[string][]exprInfo   // expressions from included files, keyed by URI
 }
 
 type exprInfo struct {
@@ -777,7 +778,15 @@ func newDocumentFS(uri, text string, fsys fs.FS) *document {
 	// Root is the directory containing the main file.
 	// All include paths are relative to this root.
 	root := path.Dir(source)
-	d := &document{uri: uri, source: source, root: root, text: text, defs: make(map[string]definition), fsys: fsys}
+	d := &document{
+		uri:          uri,
+		source:       source,
+		root:         root,
+		text:         text,
+		defs:         make(map[string]definition),
+		fsys:         fsys,
+		includedExpr: make(map[string][]exprInfo),
+	}
 	d.parse()
 	return d
 }
@@ -792,6 +801,7 @@ func (d *document) parse() {
 	d.exprs = d.exprs[:0]
 	d.errors = d.errors[:0]
 	clear(d.defs)
+	clear(d.includedExpr)
 
 	d.parseFile(d.uri, d.source, d.text, nil)
 
@@ -856,36 +866,38 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 			continue
 		}
 
-		// Only track expressions for the main document
-		if uri == d.uri {
-			info := exprInfo{expr: expr, line: expr.Line - 1}
-			if expr.Name == "define" {
-				header, bodyText, _ := strings.Cut(expr.Body, "\n")
-				fields := strings.Fields(header)
-				if len(fields) > 0 {
-					info.definedName = fields[0]
-				}
-				// Parse body expressions for context help
-				if bodyText != "" {
-					bodyDec := linebased.NewDecoder(strings.NewReader(bodyText))
-					for {
-						bodyExpr, err := bodyDec.Decode()
-						if errors.Is(err, io.EOF) {
-							break
-						}
-						if err != nil {
-							break
-						}
-						if bodyExpr.Name != "" {
-							info.bodyExprs = append(info.bodyExprs, bodyExprInfo{
-								name: bodyExpr.Name,
-								line: info.line + bodyExpr.Line, // document line
-							})
-						}
+		// Track expressions for main document and included files
+		info := exprInfo{expr: expr, line: expr.Line - 1}
+		if expr.Name == "define" {
+			header, bodyText, _ := strings.Cut(expr.Body, "\n")
+			fields := strings.Fields(header)
+			if len(fields) > 0 {
+				info.definedName = fields[0]
+			}
+			// Parse body expressions for context help
+			if bodyText != "" {
+				bodyDec := linebased.NewDecoder(strings.NewReader(bodyText))
+				for {
+					bodyExpr, err := bodyDec.Decode()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						break
+					}
+					if bodyExpr.Name != "" {
+						info.bodyExprs = append(info.bodyExprs, bodyExprInfo{
+							name: bodyExpr.Name,
+							line: info.line + bodyExpr.Line, // document line
+						})
 					}
 				}
 			}
+		}
+		if uri == d.uri {
 			d.exprs = append(d.exprs, info)
+		} else {
+			d.includedExpr[uri] = append(d.includedExpr[uri], info)
 		}
 
 		if expr.Name == "define" {
@@ -1051,26 +1063,45 @@ func (d *document) expandTrace(name, args string, def definition) string {
 	return out.String()
 }
 
-func (d *document) references(name string, includeDecl bool) []span {
-	var refs []span
-	for _, info := range d.exprs {
-		if info.expr.Name == name {
-			nameLen := utf16Len(name)
-			refs = append(refs, span{info.line, 0, info.line, nameLen})
-		} else if includeDecl && info.definedName == name {
-			start := utf16Len(info.expr.Name) + 1
-			length := utf16Len(info.definedName)
-			refs = append(refs, span{info.line, start, info.line, start + length})
-		}
-		// Check body expressions within defines
-		for _, bodyExpr := range info.bodyExprs {
-			if bodyExpr.name == name {
+// refLocation combines a span with a URI for cross-file references.
+type refLocation struct {
+	uri  string
+	span span
+}
+
+func (d *document) references(name string, includeDecl bool) []refLocation {
+	var refs []refLocation
+
+	// Helper to find refs in a slice of exprs
+	findRefs := func(uri string, exprs []exprInfo) {
+		for _, info := range exprs {
+			if info.expr.Name == name {
 				nameLen := utf16Len(name)
-				// Body lines have a leading tab, so command starts at char 1
-				refs = append(refs, span{bodyExpr.line, 1, bodyExpr.line, 1 + nameLen})
+				refs = append(refs, refLocation{uri, span{info.line, 0, info.line, nameLen}})
+			} else if includeDecl && info.definedName == name {
+				start := utf16Len(info.expr.Name) + 1
+				length := utf16Len(info.definedName)
+				refs = append(refs, refLocation{uri, span{info.line, start, info.line, start + length}})
+			}
+			// Check body expressions within defines
+			for _, bodyExpr := range info.bodyExprs {
+				if bodyExpr.name == name {
+					nameLen := utf16Len(name)
+					// Body lines have a leading tab, so command starts at char 1
+					refs = append(refs, refLocation{uri, span{bodyExpr.line, 1, bodyExpr.line, 1 + nameLen}})
+				}
 			}
 		}
 	}
+
+	// Search main document
+	findRefs(d.uri, d.exprs)
+
+	// Search included files
+	for uri, exprs := range d.includedExpr {
+		findRefs(uri, exprs)
+	}
+
 	return refs
 }
 
