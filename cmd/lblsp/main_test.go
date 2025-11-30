@@ -338,6 +338,51 @@ func TestUTF16Len(t *testing.T) {
 	}
 }
 
+func TestExpandTrace(t *testing.T) {
+	text := "# Greet someone\ndefine greet name\n\techo Hello, $name!\ngreet Alice\n"
+	doc := newDocument("file:///test.linebased", text)
+
+	// Get the definition
+	def, ok := doc.defs["greet"]
+	if !ok {
+		t.Fatal("greet definition not found")
+	}
+
+	// Get the call expression
+	info, ok := doc.exprAt(3) // line 3 is "greet Alice" (0-indexed)
+	if !ok {
+		t.Fatal("expression at line 3 not found")
+	}
+
+	trace := doc.expandTrace("greet", info.expr.Body, def)
+	want := "echo Hello, Alice!\n"
+	if trace != want {
+		t.Errorf("expandTrace:\n got: %q\nwant: %q", trace, want)
+	}
+}
+
+func TestExpandTraceMultiLine(t *testing.T) {
+	// Template that expands to multiple lines
+	text := "define setup\n\techo one\n\techo two\nsetup\n"
+	doc := newDocument("file:///test.linebased", text)
+
+	def, ok := doc.defs["setup"]
+	if !ok {
+		t.Fatal("setup definition not found")
+	}
+
+	info, ok := doc.exprAt(3) // line 3 is "setup"
+	if !ok {
+		t.Fatal("expression at line 3 not found")
+	}
+
+	trace := doc.expandTrace("setup", info.expr.Body, def)
+	want := "echo one\necho two\n"
+	if trace != want {
+		t.Errorf("expandTrace multi-line:\n got: %q\nwant: %q", trace, want)
+	}
+}
+
 func TestSpanToLSP(t *testing.T) {
 	s := span{1, 2, 3, 4}
 	got := s.toLSP()
