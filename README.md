@@ -18,8 +18,9 @@ tooling includes an LSP server for editor integration.
 ## Design
 
 Linebased scripts are deliberately simple. There are no string escapes, no
-quoting rules, no operator precedence, no reserved words. A line is a command
-name followed by whatever text you want. That's it.
+quoting rules, no operator precedence. A line is a command name followed by
+whatever text you want. That's it. The only reserved words are `define` and
+`include`, which provide templates and file composition.
 
 This simplicity has a cost: you can't nest expressions or compute values inline.
 But it has a benefit: scripts are trivial to read, write, and debug. The parser
