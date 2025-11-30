@@ -30,7 +30,7 @@ syn match linebasedTemplateName "\S\+" contained nextgroup=linebasedParameter sk
 syn match linebasedParameter "\S\+" contained nextgroup=linebasedParameter skipwhite
 
 " Command name (first word on a non-continuation, non-comment, non-blank line)
-syn match linebasedCommand "^\S\+" contains=linebasedDefine,linebasedInclude
+syn match linebasedCommand "^[^#\t]\S*" contains=linebasedDefine,linebasedInclude
 
 " Highlighting links
 hi def link linebasedComment Comment
@@ -41,5 +41,8 @@ hi def link linebasedTemplateName Function
 hi def link linebasedParameter Identifier
 hi def link linebasedVariable Special
 hi def link linebasedCommand Statement
+
+" Sync from start of line - linebased is line-oriented
+syn sync linebreaks=1
 
 let b:current_syntax = "linebased"
