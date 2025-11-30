@@ -316,7 +316,10 @@ func (d *ExpandingDecoder) expandTemplate(t template, callsite Expanded) (*Expan
 			return nil, err
 		}
 		if result != nil {
-			result.Stack = d.callStack.framesCopy()
+			// Only set Stack if not already set by a nested expansion.
+			if len(result.Stack) == 0 {
+				result.Stack = d.callStack.framesCopy()
+			}
 			expanded = append(expanded, *result)
 		}
 	}

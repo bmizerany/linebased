@@ -173,3 +173,14 @@ record include with extension
 	include foo.linebased
 check
 	include_with_extension:1: include: path "foo.linebased" has .linebased extension; the extension is not required and will be added automatically
+
+# Nested template expansion preserves full stack depth
+record! nested stack
+	define echo tail
+	define inner x
+		echo inner: $x
+	define outer y
+		inner $y
+	outer hello
+check
+	nested_stack:6: inner@1> echo inner: hello

@@ -58,13 +58,37 @@ include helpers
 See the [package documentation](https://pkg.go.dev/blake.io/linebased) for
 syntax, semantics, and API reference.
 
-## Editor support
+## Tooling
 
-Install the LSP server:
+Install lblsp:
 
 ```
 go install blake.io/linebased/cmd/lblsp@latest
 ```
+
+### Debugging with expand
+
+See exactly what your templates produce:
+
+```
+$ lblsp expand script.linebased
+echo Hello, Alice!
+echo Hello, Bob!
+```
+
+Add `-x` for shell-style tracing that shows each template call as it expands:
+
+```
+$ lblsp expand -x script.linebased
++ script.linebased:7: outer hello
+++ script.linebased:1: inner hello
+echo inner: hello
+```
+
+The `+` signs show nesting depth—when `outer` calls `inner` which produces
+`echo`, you see the full expansion chain.
+
+### Editor support
 
 Configure Neovim:
 
