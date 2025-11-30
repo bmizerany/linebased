@@ -49,14 +49,18 @@ editor to run lblsp as the language server for .linebased files.
 Clone the repository and add the editor/vim directory to your runtimepath.
 In your vimrc or init.vim:
 
-	set runtimepath+=~/src/linebased/editor/vim
+	set rtp^=~/src/linebased/editor/vim
 
 Or in init.lua:
 
-	vim.opt.rtp:append('~/src/linebased/editor/vim')
+	vim.opt.rtp:prepend(vim.fn.expand("~/src/linebased/editor/vim"))
 
 The plugin provides filetype detection, syntax highlighting, and LSP
-integration (Neovim only).
+integration (Neovim only). It will prompt to install lblsp on first use
+if not found in PATH. See the plugin documentation for key mappings and
+configuration options:
+
+	https://github.com/bmizerany/linebased/blob/main/editor/vim/doc/linebased.txt
 
 Using coc.nvim (alternative to built-in LSP), add to coc-settings.json:
 

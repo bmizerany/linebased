@@ -18,7 +18,7 @@ INSTALLATION                                    *linebased-install*
 
 Clone the repository and add the plugin to your runtimepath. In your vimrc:
 >
-    set rtp+=~/src/linebased/editor/vim
+    set rtp^=~/src/linebased/editor/vim
 <
 Or in Neovim's init.lua:
 >
