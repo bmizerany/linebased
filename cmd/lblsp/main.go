@@ -34,6 +34,8 @@ When run without arguments, lblsp starts an LSP server with:
   - Hover: Documentation for templates at definition and call sites
   - Go to Definition: Navigate from template calls to their definitions
   - Find References: Locate all uses of a template
+  - Rename: Rename a template and all its references
+  - Code Actions: Inline a template call with its expansion
   - Semantic Tokens: Syntax highlighting for comments, keywords, templates,
     parameters, and variable expansions
 
@@ -320,6 +322,8 @@ func (s *server) dispatch(msg *request) error {
 		return s.handleReferences(msg)
 	case "textDocument/codeAction":
 		return s.handleCodeAction(msg)
+	case "textDocument/rename":
+		return s.handleRename(msg)
 	case "textDocument/semanticTokens/full":
 		return s.handleSemanticTokens(msg)
 	case "$/cancelRequest", "workspace/didChangeConfiguration":
@@ -346,6 +350,7 @@ func (s *server) handleInitialize(msg *request) error {
 			"referencesProvider": true,
 			"definitionProvider": true,
 			"codeActionProvider": true,
+			"renameProvider": true,
 			"semanticTokensProvider": {
 				"legend": {"tokenTypes": ["comment", "keyword", "function", "string", "parameter", "variable"], "tokenModifiers": []},
 				"full": true
@@ -614,6 +619,55 @@ func (s *server) handleCodeAction(msg *request) error {
 	}
 
 	return s.reply(msg.ID, []any{action})
+}
+
+func (s *server) handleRename(msg *request) error {
+	if msg.ID == nil {
+		return nil
+	}
+	var p struct {
+		TextDocument textDocumentIdentifier `json:"textDocument"`
+		Position     position               `json:"position"`
+		NewName      string                 `json:"newName"`
+	}
+	if err := json.Unmarshal(msg.Params, &p); err != nil {
+		return s.sendError(msg.ID, codeInvalidParams, err.Error())
+	}
+	doc := s.docs[p.TextDocument.URI]
+	if doc == nil {
+		return s.reply(msg.ID, nil)
+	}
+
+	// Get the symbol at cursor position
+	name, _, ok := doc.symbolAt(p.Position.Line, p.Position.Character)
+	if !ok {
+		return s.reply(msg.ID, nil)
+	}
+
+	// Get all references including declaration
+	refs := doc.references(name, true)
+	if len(refs) == 0 {
+		return s.reply(msg.ID, nil)
+	}
+
+	// Build workspace edit grouped by URI
+	changes := make(map[string][]struct {
+		Range   lspRange `json:"range"`
+		NewText string   `json:"newText"`
+	})
+	for _, ref := range refs {
+		changes[ref.uri] = append(changes[ref.uri], struct {
+			Range   lspRange `json:"range"`
+			NewText string   `json:"newText"`
+		}{Range: ref.span.toLSP(), NewText: p.NewName})
+	}
+
+	return s.reply(msg.ID, struct {
+		Changes map[string][]struct {
+			Range   lspRange `json:"range"`
+			NewText string   `json:"newText"`
+		} `json:"changes"`
+	}{Changes: changes})
 }
 
 func (s *server) handleSemanticTokens(msg *request) error {

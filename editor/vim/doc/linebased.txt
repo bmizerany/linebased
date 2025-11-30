@@ -55,6 +55,10 @@ The following |<Plug>| mappings are provided (Neovim only):
 <Plug>(linebased-inline)        Inline template. Replace the template call
                                 under the cursor with its expanded content.
 
+                                        *<Plug>(linebased-rename)*
+<Plug>(linebased-rename)        Rename template. Rename the template under
+                                the cursor and all its references.
+
 Default key mappings are created unless |g:linebased_no_mappings| is set or
 a mapping to the <Plug> already exists:
 
@@ -62,6 +66,7 @@ a mapping to the <Plug> already exists:
         gD      <Plug>(linebased-type-definition)
         K       <Plug>(linebased-hover)
         gri     <Plug>(linebased-inline)
+        rn      <Plug>(linebased-rename)
 
 To use different keys, map them in ~/.vim/after/ftplugin/linebased.vim:
 >
