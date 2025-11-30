@@ -88,6 +88,18 @@ echo inner: hello
 The `+` signs show nesting depth—when `outer` calls `inner` which produces
 `echo`, you see the full expansion chain.
 
+### Coding agent instructions
+
+For AI coding assistants (Claude, Copilot, etc.), lblsp provides built-in
+instructions:
+
+```
+lblsp instructions
+```
+
+This outputs guidance on working with linebased files, emphasizing the expand
+command for debugging. Add the output to your CLAUDE.md or system prompt.
+
 ### Editor support
 
 Configure Neovim:

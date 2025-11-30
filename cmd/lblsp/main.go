@@ -26,6 +26,17 @@ expands:
 The + signs indicate nesting depth. When outer calls inner which produces echo,
 you see + for outer, ++ for inner, then the final expanded expression.
 
+# Instructions Subcommand
+
+The instructions subcommand prints guidance for coding agents (AI assistants)
+working with linebased files:
+
+	lblsp instructions
+
+This outputs tips on using the expand command, LSP features, and best practices
+for working with linebased templates. Useful for including in system prompts or
+CLAUDE.md files.
+
 # LSP Features
 
 When run without arguments, lblsp starts an LSP server with:
@@ -141,6 +152,7 @@ package main
 
 import (
 	"bufio"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -160,6 +172,9 @@ import (
 	"blake.io/linebased"
 )
 
+//go:embed instructions.md
+var instructions string
+
 // JSON-RPC error codes
 const (
 	codeParseError     = -32700
@@ -175,6 +190,9 @@ func main() {
 				fmt.Fprintf(os.Stderr, "lblsp expand: %v\n", err)
 				os.Exit(1)
 			}
+			return
+		case "instructions":
+			fmt.Print(instructions)
 			return
 		}
 	}
