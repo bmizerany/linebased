@@ -437,17 +437,24 @@ func (s *server) handleHover(msg *request) error {
 	var content strings.Builder
 	if def.doc != "" {
 		content.WriteString(def.doc)
+		content.WriteString("\n\n")
 	}
+
+	// Show signature
+	content.WriteString("```linebased\n")
+	content.WriteString(name)
+	for _, param := range def.params {
+		content.WriteString(" ")
+		content.WriteString(param)
+	}
+	content.WriteString("\n```")
 
 	// If this is a call site (not a definition), show expansion
 	if info, isCall := doc.exprAt(p.Position.Line); isCall && info.definedName == "" {
-		if content.Len() > 0 {
-			content.WriteString("\n\n---\n\n")
-		}
 		if def.body == "" {
-			content.WriteString("No expansion")
+			content.WriteString("\n\nNo expansion")
 		} else {
-			content.WriteString("Expands to:\n```linebased\n")
+			content.WriteString("\n\nExpands to:\n\n```linebased\n")
 			trace := doc.expandTrace(name, info.expr.Body, def)
 			content.WriteString(trace)
 			content.WriteString("```")
