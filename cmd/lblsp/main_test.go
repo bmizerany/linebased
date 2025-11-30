@@ -148,6 +148,49 @@ func TestReferences(t *testing.T) {
 	}
 }
 
+func TestSymbolAtInTemplateBody(t *testing.T) {
+	// Test that symbolAt finds template calls within define bodies
+	doc := newDocument("file:///test.lb", "define outer\n\tinner arg\ndefine inner x\n\techo $x\n")
+
+	// Line 1 is "\tinner arg" - "inner" starts at char 1 (after tab)
+	name, rng, ok := doc.symbolAt(1, 1)
+	if !ok {
+		t.Fatal("expected symbol at line 1, char 1")
+	}
+	if name != "inner" {
+		t.Errorf("symbolAt(1, 1): got %q, want %q", name, "inner")
+	}
+	if rng.startChar != 1 || rng.endChar != 6 {
+		t.Errorf("symbolAt(1, 1) range: got %d-%d, want 1-6", rng.startChar, rng.endChar)
+	}
+
+	// Char 0 (on tab) should not find symbol
+	_, _, ok = doc.symbolAt(1, 0)
+	if ok {
+		t.Error("expected no symbol at line 1, char 0 (on tab)")
+	}
+}
+
+func TestReferencesInTemplateBody(t *testing.T) {
+	// Test that references finds calls within define bodies
+	doc := newDocument("file:///test.lb", "define outer\n\tinner arg\ndefine inner x\n\techo $x\ninner foo\n")
+
+	refs := doc.references("inner", true)
+	// Should find: definition on line 2, call in body on line 1, call on line 4
+	if len(refs) != 3 {
+		t.Errorf("references(inner, true): got %d, want 3", len(refs))
+		for _, r := range refs {
+			t.Logf("  line %d, char %d-%d", r.startLine, r.startChar, r.endChar)
+		}
+	}
+
+	refs = doc.references("inner", false)
+	// Should find: call in body on line 1, call on line 4
+	if len(refs) != 2 {
+		t.Errorf("references(inner, false): got %d, want 2", len(refs))
+	}
+}
+
 func TestSemanticTokens(t *testing.T) {
 	doc := newDocument("file:///test.lb", "# comment\ndefine greet name\n\techo Hello, $name!\ngreet Alice\n")
 
@@ -180,7 +223,8 @@ func TestSemanticTokensVariables(t *testing.T) {
 }
 
 func TestSemanticTokensDefineWithVars(t *testing.T) {
-	// Test that template body is string, expansions are variable
+	// Test that template body expressions have function tokens for commands
+	// and variable tokens for expansions
 	doc := newDocument("file:///test.lb", "define foo x\n\thello ${x}. Nice to meet you $x\n")
 	tokens := doc.semanticTokens()
 	numTokens := len(tokens) / 5
@@ -197,24 +241,25 @@ func TestSemanticTokensDefineWithVars(t *testing.T) {
 
 	// Expected tokens:
 	// line 0: define (keyword), foo (function), x (parameter)
-	// line 1: body (string), ${x} (variable), $x (variable)
+	// line 1: hello (function - command in template body), ${x} (variable), $x (variable)
 	if numTokens < 6 {
 		t.Fatalf("expected at least 6 tokens, got %d", numTokens)
 	}
 
-	// Check that we have 1 string token (template body) and 2 variable tokens
-	stringCount := 0
+	// Check that we have function tokens for commands and variable tokens for expansions
+	funcCount := 0
 	varCount := 0
 	for i := 0; i < len(tokens); i += 5 {
-		if tokens[i+3] == tokString {
-			stringCount++
+		if tokens[i+3] == tokFunction {
+			funcCount++
 		}
 		if tokens[i+3] == tokVariable {
 			varCount++
 		}
 	}
-	if stringCount != 1 {
-		t.Errorf("expected 1 string token (body), got %d", stringCount)
+	// Should have 2 function tokens: "foo" (template name) and "hello" (body command)
+	if funcCount != 2 {
+		t.Errorf("expected 2 function tokens, got %d", funcCount)
 	}
 	if varCount != 2 {
 		t.Errorf("expected 2 variable tokens, got %d", varCount)
