@@ -16,6 +16,14 @@ information visit https://blake.io/linebased
 
 INSTALLATION                                    *linebased-install*
 
+Clone the repository and add the plugin to your runtimepath. In your vimrc:
+>
+    set rtp+=~/src/linebased/editor/vim
+<
+Or in Neovim's init.lua:
+>
+    vim.opt.rtp:prepend(vim.fn.expand("~/src/linebased/editor/vim"))
+<
 The plugin will prompt to install the lblsp language server on first use if
 it is not found in your PATH. This requires Go to be installed.
 
@@ -25,28 +33,46 @@ To install lblsp manually:
 <
 MAPPINGS                                        *linebased-mappings*
 
-These mappings are defined buffer-local in Neovim only:
+The following |<Plug>| mappings are provided (Neovim only):
 
-                                                *linebased-gd*
-gd                      Go to definition. Jump to where the template under
-                        the cursor is defined.
+                                        *<Plug>(linebased-definition)*
+<Plug>(linebased-definition)    Go to definition. Jump to where the template
+                                under the cursor is defined.
 
-                                                *linebased-gD*
-gD                      Go to type definition.
+                                        *<Plug>(linebased-type-definition)*
+<Plug>(linebased-type-definition)
+                                Go to type definition.
 
-                                                *linebased-K*
-K                       Hover. Show documentation for the template under
-                        the cursor.
+                                        *<Plug>(linebased-hover)*
+<Plug>(linebased-hover)         Hover. Show documentation for the template
+                                under the cursor.
 
-For other LSP features like find references, add your own mappings:
+                                        *<Plug>(linebased-references)*
+<Plug>(linebased-references)    Find all references to the template under the
+                                cursor.
+
+Default key mappings are created unless |g:linebased_no_mappings| is set or
+a mapping to the <Plug> already exists:
+
+        gd      <Plug>(linebased-definition)
+        gD      <Plug>(linebased-type-definition)
+        K       <Plug>(linebased-hover)
+
+To use different keys, map them in ~/.vim/after/ftplugin/linebased.vim:
 >
-    autocmd FileType linebased nnoremap <buffer> gr :lua vim.lsp.buf.references()<CR>
+    nmap <buffer> <Leader>d <Plug>(linebased-definition)
+    nmap <buffer> <Leader>r <Plug>(linebased-references)
 <
-
 OPTIONS                                         *linebased-options*
 
                                                 *g:loaded_linebased*
 g:loaded_linebased      Set to 1 to disable the plugin entirely.
+
+                                                *g:linebased_no_mappings*
+g:linebased_no_mappings
+                        Set to 1 to disable all default key mappings.
+                        The |<Plug>| mappings remain available for you to
+                        map manually.
 
 HIGHLIGHTING                                    *linebased-highlighting*
 
@@ -66,13 +92,13 @@ context-aware highlighting in template bodies.
 
                                                 *linebased-special*
 Note: Some colorschemes set Special (used for variables) to the same color
-as Normal. If variable expansions are invisible, override it in your vimrc:
+as Normal. If variable expansions are invisible, add to your vimrc:
 >
     hi Special guifg=#a3be8c ctermfg=green
 <
-Or for linebased files only:
+Or in ~/.vim/after/ftplugin/linebased.vim:
 >
-    autocmd FileType linebased hi Special guifg=#a3be8c ctermfg=green
+    hi Special guifg=#a3be8c ctermfg=green
 <
 ABOUT                                           *linebased-about*
 
