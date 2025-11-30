@@ -6,7 +6,10 @@ if exists('b:did_ftplugin')
 endif
 let b:did_ftplugin = 1
 
-let b:undo_ftplugin = 'setl cms<'
+setlocal makeprg=lblsp\ expand\ -fullpath\ %
+setlocal errorformat=%f:%l:\ %m
+
+let b:undo_ftplugin = 'setl cms< makeprg< errorformat<'
 
 " LSP support (Neovim only)
 if has('nvim')

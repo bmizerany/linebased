@@ -100,6 +100,12 @@ Or in ~/.vim/after/ftplugin/linebased.vim:
 >
     hi Special guifg=#a3be8c ctermfg=green
 <
+                                                *linebased-markdown*
+To enable syntax highlighting in markdown fenced code blocks, add
+"linebased" to |g:markdown_fenced_languages| in your vimrc:
+>
+    let g:markdown_fenced_languages = ['go', 'linebased']
+<
 ABOUT                                           *linebased-about*
 
 Grab the latest version or report a bug on GitHub:

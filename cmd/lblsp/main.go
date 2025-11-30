@@ -191,6 +191,7 @@ func main() {
 func runExpand(args []string) error {
 	fs := flag.NewFlagSet("expand", flag.ContinueOnError)
 	trace := fs.Bool("x", false, "print expansion steps to stderr")
+	fullpath := fs.Bool("fullpath", false, "prefix each line with file:line: location")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -214,6 +215,11 @@ func runExpand(args []string) error {
 	fsys := os.DirFS(dir)
 	dec := linebased.NewExpandingDecoder(base, fsys)
 
+	// For fullpath mode, use absolute paths in output
+	if *fullpath {
+		dec.SetRoot(dir + "/")
+	}
+
 	for {
 		expr, err := dec.Decode()
 		if errors.Is(err, io.EOF) {
@@ -225,7 +231,11 @@ func runExpand(args []string) error {
 
 		// Output comment if present
 		if expr.Comment != "" {
-			fmt.Print(expr.Comment)
+			if *fullpath {
+				fmt.Printf("%s:%d: %s", absPath, expr.Line, expr.Comment)
+			} else {
+				fmt.Print(expr.Comment)
+			}
 		}
 
 		// In trace mode, show template calls being expanded (like sh -x)
@@ -243,7 +253,11 @@ func runExpand(args []string) error {
 		}
 
 		// Output expression (including blank lines to preserve structure)
-		fmt.Print(expr.String())
+		if *fullpath {
+			fmt.Printf("%s: %s", expr.Where(), expr.String())
+		} else {
+			fmt.Print(expr.String())
+		}
 	}
 
 	return nil
