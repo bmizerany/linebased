@@ -18,11 +18,13 @@ if has('nvim')
   nnoremap <silent> <buffer> <Plug>(linebased-type-definition) <Cmd>lua vim.lsp.buf.type_definition()<CR>
   nnoremap <silent> <buffer> <Plug>(linebased-hover) <Cmd>lua vim.lsp.buf.hover()<CR>
   nnoremap <silent> <buffer> <Plug>(linebased-references) <Cmd>lua vim.lsp.buf.references()<CR>
+  nnoremap <silent> <buffer> <Plug>(linebased-inline) <Cmd>lua vim.lsp.buf.code_action({ filter = function(a) return a.kind == 'refactor.inline' end, apply = true })<CR>
 
   let b:undo_ftplugin .= '| silent! nunmap <buffer> <Plug>(linebased-definition)'
   let b:undo_ftplugin .= '| silent! nunmap <buffer> <Plug>(linebased-type-definition)'
   let b:undo_ftplugin .= '| silent! nunmap <buffer> <Plug>(linebased-hover)'
   let b:undo_ftplugin .= '| silent! nunmap <buffer> <Plug>(linebased-references)'
+  let b:undo_ftplugin .= '| silent! nunmap <buffer> <Plug>(linebased-inline)'
 
   " Set default mappings unless user opted out or already mapped
   if !exists('g:linebased_no_mappings') || !g:linebased_no_mappings
@@ -37,6 +39,10 @@ if has('nvim')
     if !hasmapto('<Plug>(linebased-hover)')
       nmap <buffer> K <Plug>(linebased-hover)
       let b:undo_ftplugin .= '| silent! nunmap <buffer> K'
+    endif
+    if !hasmapto('<Plug>(linebased-inline)')
+      nmap <buffer> gri <Plug>(linebased-inline)
+      let b:undo_ftplugin .= '| silent! nunmap <buffer> gri'
     endif
   endif
 

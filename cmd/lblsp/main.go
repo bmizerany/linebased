@@ -318,6 +318,8 @@ func (s *server) dispatch(msg *request) error {
 		return s.handleDefinition(msg)
 	case "textDocument/references":
 		return s.handleReferences(msg)
+	case "textDocument/codeAction":
+		return s.handleCodeAction(msg)
 	case "textDocument/semanticTokens/full":
 		return s.handleSemanticTokens(msg)
 	case "$/cancelRequest", "workspace/didChangeConfiguration":
@@ -343,6 +345,7 @@ func (s *server) handleInitialize(msg *request) error {
 			"hoverProvider": true,
 			"referencesProvider": true,
 			"definitionProvider": true,
+			"codeActionProvider": true,
 			"semanticTokensProvider": {
 				"legend": {"tokenTypes": ["comment", "keyword", "function", "string", "parameter", "variable"], "tokenModifiers": []},
 				"full": true
@@ -546,6 +549,71 @@ func (s *server) handleReferences(msg *request) error {
 		locs[i] = location{URI: ref.uri, Range: ref.span.toLSP()}
 	}
 	return s.reply(msg.ID, locs)
+}
+
+func (s *server) handleCodeAction(msg *request) error {
+	if msg.ID == nil {
+		return nil
+	}
+	var p struct {
+		TextDocument textDocumentIdentifier `json:"textDocument"`
+		Range        lspRange               `json:"range"`
+	}
+	if err := json.Unmarshal(msg.Params, &p); err != nil {
+		return s.sendError(msg.ID, codeInvalidParams, err.Error())
+	}
+	doc := s.docs[p.TextDocument.URI]
+	if doc == nil {
+		return s.reply(msg.ID, []any{})
+	}
+
+	// Check if cursor is on a template call (not a definition)
+	info, ok := doc.exprAt(p.Range.Start.Line)
+	if !ok || info.definedName != "" || info.expr.Name == "" {
+		return s.reply(msg.ID, []any{})
+	}
+
+	// Check if this is a known template
+	def, ok := doc.defs[info.expr.Name]
+	if !ok || def.body == "" {
+		return s.reply(msg.ID, []any{})
+	}
+
+	// Get the expanded content
+	expanded := doc.expandTrace(info.expr.Name, info.expr.Body, def)
+	if expanded == "" {
+		return s.reply(msg.ID, []any{})
+	}
+
+	// Calculate the range of the entire expression line
+	lineLen := 0
+	if info.line < len(doc.lines) {
+		lineLen = utf16Len(doc.lines[info.line])
+	}
+	exprRange := span{info.line, 0, info.line, lineLen}.toLSP()
+
+	// Build the code action with workspace edit
+	action := struct {
+		Title string `json:"title"`
+		Kind  string `json:"kind"`
+		Edit  struct {
+			Changes map[string][]struct {
+				Range   lspRange `json:"range"`
+				NewText string   `json:"newText"`
+			} `json:"changes"`
+		} `json:"edit"`
+	}{
+		Title: "Inline template",
+		Kind:  "refactor.inline",
+	}
+	action.Edit.Changes = map[string][]struct {
+		Range   lspRange `json:"range"`
+		NewText string   `json:"newText"`
+	}{
+		p.TextDocument.URI: {{Range: exprRange, NewText: strings.TrimSuffix(expanded, "\n")}},
+	}
+
+	return s.reply(msg.ID, []any{action})
 }
 
 func (s *server) handleSemanticTokens(msg *request) error {
