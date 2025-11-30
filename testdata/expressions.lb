@@ -152,14 +152,24 @@ check
 	unknownparam:1: unknown parameter reference: "b"
 
 record include missing
-	include missingfile.lb
+	include missingfile
 check
-	include_missing:1: open missingfile.lb: file does not exist
+	include_missing:1: open missingfile.linebased: file does not exist
 
 record! include ok
-	include _include.lb
+	include _include
 	foo
 	bar
 check
-	_include.lb:2: foo@1> bar
+	include_ok:2: foo@1> bar
 	include_ok:3: main@3> bar
+
+record include with slash
+	include foo/bar
+check
+	include_with_slash:1: include: path "foo/bar" contains '/'; only root-level includes are allowed
+
+record include with extension
+	include foo.linebased
+check
+	include_with_extension:1: include: path "foo.linebased" has .linebased extension; the extension is not required and will be added automatically

@@ -332,11 +332,11 @@ func ExampleExpand() {
 func ExampleExpand_include() {
 	fsys := fstest.MapFS{
 		"main.lb": &fstest.MapFile{Data: []byte("" +
-			"include greetings.lb\n" +
+			"include greetings\n" +
 			"hello Alice\n" +
 			"goodbye Bob\n",
 		)},
-		"greetings.lb": &fstest.MapFile{Data: []byte("" +
+		"greetings.linebased": &fstest.MapFile{Data: []byte("" +
 			"define say tail\n" +
 			"define hello name\n" +
 			"\tsay Hello, $name!\n" +
@@ -369,8 +369,8 @@ func ExampleExpand_include() {
 func TestExpandInclude(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		fsys := fstest.MapFS{
-			"main.lb":  &fstest.MapFile{Data: []byte("include other.lb\n")},
-			"other.lb": &fstest.MapFile{Data: []byte("define echo tail\necho hi\n")},
+			"main.lb":          &fstest.MapFile{Data: []byte("include other\n")},
+			"other.linebased":  &fstest.MapFile{Data: []byte("define echo tail\necho hi\n")},
 		}
 
 		var got []string
@@ -397,7 +397,7 @@ func TestExpandInclude(t *testing.T) {
 
 	t.Run("missing", func(t *testing.T) {
 		fsys := fstest.MapFS{
-			"main.lb": &fstest.MapFile{Data: []byte("include missing.lb\n")},
+			"main.lb": &fstest.MapFile{Data: []byte("include missing\n")},
 		}
 		var gotErr error
 		d := NewExpandingDecoder("main.lb", fsys)
@@ -419,15 +419,16 @@ func TestExpandInclude(t *testing.T) {
 		if !errors.As(gotErr, &pe) {
 			t.Fatalf("expected PathError, got %T: %v", gotErr, gotErr)
 		}
-		if pe.Path != "missing.lb" {
+		if pe.Path != "missing.linebased" {
 			t.Fatalf("unexpected PathError path: %q", pe.Path)
 		}
 	})
 
 	t.Run("cycle", func(t *testing.T) {
 		fsys := fstest.MapFS{
-			"main.lb":  &fstest.MapFile{Data: []byte("include other.lb\n")},
-			"other.lb": &fstest.MapFile{Data: []byte("include main.lb\n")},
+			"main.lb":          &fstest.MapFile{Data: []byte("include a\n")},
+			"a.linebased":      &fstest.MapFile{Data: []byte("include b\n")},
+			"b.linebased":      &fstest.MapFile{Data: []byte("include a\n")},
 		}
 		var gotErr error
 		d := NewExpandingDecoder("main.lb", fsys)
@@ -445,9 +446,61 @@ func TestExpandInclude(t *testing.T) {
 		if gotErr == nil {
 			t.Fatalf("expected cycle error, got nil")
 		}
-		want := "other.lb:1: include cycle detected: main.lb -> other.lb -> main.lb"
+		want := "b.linebased:1: include cycle detected: main.lb -> a.linebased -> b.linebased -> a.linebased"
 		if gotErr.Error() != want {
 			t.Fatalf("unexpected cycle error:\n got %q\nwant %q", gotErr.Error(), want)
+		}
+	})
+
+	t.Run("slash in path", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"main.lb": &fstest.MapFile{Data: []byte("include foo/bar\n")},
+		}
+		var gotErr error
+		d := NewExpandingDecoder("main.lb", fsys)
+		for {
+			_, err := d.Decode()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				gotErr = err
+				break
+			}
+		}
+
+		if gotErr == nil {
+			t.Fatalf("expected error for path with slash, got nil")
+		}
+		want := `main.lb:1: include: path "foo/bar" contains '/'; only root-level includes are allowed`
+		if gotErr.Error() != want {
+			t.Fatalf("unexpected error:\n got %q\nwant %q", gotErr.Error(), want)
+		}
+	})
+
+	t.Run("linebased extension", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"main.lb": &fstest.MapFile{Data: []byte("include foo.linebased\n")},
+		}
+		var gotErr error
+		d := NewExpandingDecoder("main.lb", fsys)
+		for {
+			_, err := d.Decode()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				gotErr = err
+				break
+			}
+		}
+
+		if gotErr == nil {
+			t.Fatalf("expected error for .linebased extension, got nil")
+		}
+		want := `main.lb:1: include: path "foo.linebased" has .linebased extension; the extension is not required and will be added automatically`
+		if gotErr.Error() != want {
+			t.Fatalf("unexpected error:\n got %q\nwant %q", gotErr.Error(), want)
 		}
 	})
 }
@@ -457,7 +510,7 @@ var useAbsPaths = sync.OnceValue(func() bool {
 	return f != nil && f.Value.String() == "true"
 })
 
-//go:embed testdata/*.lb
+//go:embed testdata/*.lb testdata/*.linebased
 var scripts embed.FS
 
 func TestExpandingDecoder(t *testing.T) {
@@ -471,9 +524,9 @@ func TestExpandingDecoder(t *testing.T) {
 	}
 
 	includes := func() (includes fstest.MapFS) {
-		files, err := fs.Glob(scripts, "testdata/_*.lb")
+		files, err := fs.Glob(scripts, "testdata/_*.linebased")
 		if err != nil {
-			t.Fatalf("glob testdata/_*.lb: %v", err)
+			t.Fatalf("glob testdata/_*.linebased: %v", err)
 		}
 		includes = make(fstest.MapFS)
 		for _, file := range files {

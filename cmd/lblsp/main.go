@@ -357,6 +357,18 @@ func (s *server) handleDefinition(msg *request) error {
 	if doc == nil {
 		return s.reply(msg.ID, nil)
 	}
+
+	// Check if cursor is on an include path
+	if includePath, ok := doc.includePathAt(p.Position.Line, p.Position.Character); ok {
+		// Include paths are rooted at doc.root with .linebased extension added
+		absolutePath := path.Join(doc.root, includePath+".linebased")
+		includeURI := "file://" + absolutePath
+		return s.reply(msg.ID, location{
+			URI:   includeURI,
+			Range: span{0, 0, 0, 0}.toLSP(),
+		})
+	}
+
 	name, _, ok := doc.symbolAt(p.Position.Line, p.Position.Character)
 	if !ok {
 		return s.reply(msg.ID, nil)
@@ -582,13 +594,14 @@ type diagnostic struct {
 
 type document struct {
 	uri    string
-	source string
+	source string // absolute path to the file
+	root   string // root directory for resolving includes
 	text   string
 	lines  []string
 	exprs  []exprInfo
 	defs   map[string]definition
 	errors []diagError
-	fsys   fs.FS // filesystem for resolving includes (nil uses os.DirFS)
+	fsys   fs.FS // filesystem for resolving includes (nil uses os.DirFS(root))
 }
 
 type exprInfo struct {
@@ -629,7 +642,10 @@ func newDocumentFS(uri, text string, fsys fs.FS) *document {
 			source = p
 		}
 	}
-	d := &document{uri: uri, source: source, text: text, defs: make(map[string]definition), fsys: fsys}
+	// Root is the directory containing the main file.
+	// All include paths are relative to this root.
+	root := path.Dir(source)
+	d := &document{uri: uri, source: source, root: root, text: text, defs: make(map[string]definition), fsys: fsys}
 	d.parse()
 	return d
 }
@@ -738,42 +754,38 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 		} else if expr.Name == "include" {
 			includePath := strings.TrimSpace(strings.Split(expr.Body, "\n")[0])
 			if includePath != "" {
-				d.processInclude(uri, source, includePath, seen)
+				d.processInclude(includePath, seen)
 			}
 		}
 	}
 }
 
-// processInclude reads and parses an included file.
-func (d *document) processInclude(callerURI, callerSource, includePath string, seen map[string]bool) {
-	// Resolve include path relative to the caller's directory
-	var resolvedPath string
-	var includeURI string
-
-	if d.fsys != nil {
-		// Using a custom filesystem (e.g., in tests)
-		resolvedPath = includePath
-		includeURI = "file:///" + includePath
-	} else {
-		// Using real filesystem - resolve relative to caller
-		callerDir := path.Dir(callerSource)
-		resolvedPath = path.Join(callerDir, includePath)
-		includeURI = "file://" + resolvedPath
-	}
+// processInclude reads and parses an included file, adding its definitions
+// to the document's definition map. Include paths are rooted at the document's
+// root directory, matching the behavior of [linebased.ExpandingDecoder].
+//
+// For example, if /project/main.lb includes "lib", the decoder opens
+// "lib.linebased" from the root directory /project/.
+func (d *document) processInclude(includePath string, seen map[string]bool) {
+	// Include paths are rooted at d.root with .linebased extension added.
+	// This matches the behavior of linebased.ExpandingDecoder.
+	includePath = includePath + ".linebased"
+	absolutePath := path.Join(d.root, includePath)
+	includeURI := "file://" + absolutePath
 
 	// Read the included file
 	var content []byte
 	var err error
 	if d.fsys != nil {
-		content, err = fs.ReadFile(d.fsys, resolvedPath)
+		content, err = fs.ReadFile(d.fsys, includePath)
 	} else {
-		content, err = os.ReadFile(resolvedPath)
+		content, err = os.ReadFile(absolutePath)
 	}
 	if err != nil {
 		return // silently ignore missing includes for now
 	}
 
-	d.parseFile(includeURI, resolvedPath, string(content), seen)
+	d.parseFile(includeURI, includePath, string(content), seen)
 }
 
 func (d *document) symbolAt(line, char int) (string, span, bool) {
@@ -794,6 +806,23 @@ func (d *document) symbolAt(line, char int) (string, span, bool) {
 		}
 	}
 	return "", span{}, false
+}
+
+// includePathAt returns the include path if cursor is on an include statement's path.
+func (d *document) includePathAt(line, char int) (string, bool) {
+	for _, info := range d.exprs {
+		if info.line != line || info.expr.Name != "include" {
+			continue
+		}
+		// Include path starts after "include "
+		start := utf16Len("include ")
+		includePath := strings.TrimSpace(strings.Split(info.expr.Body, "\n")[0])
+		length := utf16Len(includePath)
+		if char >= start && char < start+length {
+			return includePath, true
+		}
+	}
+	return "", false
 }
 
 func (d *document) references(name string, includeDecl bool) []span {

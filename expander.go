@@ -36,6 +36,7 @@ func (e *ExpressionError) Unwrap() error {
 type ExpandingDecoder struct {
 	fsys fs.FS
 	defs map[string]template
+	root string // prefix for file paths in error messages
 
 	// decoderStack holds nested decoders for includes.
 	// The last element is the current decoder.
@@ -61,8 +62,13 @@ type decoderFrame struct {
 	file string
 }
 
-// NewExpandingDecoder creates an ExpandedDecoder that reads from the named file
+// NewExpandingDecoder creates an ExpandingDecoder that reads from the named file
 // in fsys, expanding any templates defined in-line.
+//
+// Include paths are rooted at fsys. For example, if main.lb contains
+// "include lib/utils.lb", the decoder opens "lib/utils.lb" from fsys directly.
+// There is no relative path resolution - all includes are absolute paths
+// within the filesystem.
 //
 // Expressions with names that do not match a template are passed through as-is.
 // Invalid expansions are reported as [ExpressionError].
@@ -84,6 +90,21 @@ func NewExpandingDecoder(name string, fsys fs.FS) *ExpandingDecoder {
 	d.decoderStack = []decoderFrame{{dec: NewDecoder(f), file: name}}
 	d.includeStack = []string{name}
 	return d
+}
+
+// SetRoot sets a prefix for file paths in error messages. This is useful when
+// the fsys is rooted at a subdirectory but you want error messages to show
+// paths relative to a parent directory (e.g., the module root).
+//
+// For example, if fsys is rooted at "." but tests are in "pkg/testdata/",
+// calling SetRoot("pkg/") will cause error messages to show "pkg/testdata/file.lb"
+// instead of just "testdata/file.lb".
+func (d *ExpandingDecoder) SetRoot(root string) {
+	d.root = root
+}
+
+func (d *ExpandingDecoder) filePath(name string) string {
+	return path.Join(d.root, name)
 }
 
 // Decode reads and returns the next expanded expression.
@@ -122,7 +143,7 @@ func (d *ExpandingDecoder) Decode() (Expanded, error) {
 			var synErr *SyntaxError
 			if errors.As(err, &synErr) {
 				d.err = &ExpressionError{
-					Expanded: Expanded{Expression: Expression{Line: synErr.Line}, File: frame.file},
+					Expanded: Expanded{Expression: Expression{Line: synErr.Line}, File: d.filePath(frame.file)},
 					Err:      errors.New(synErr.Message),
 				}
 			} else {
@@ -133,7 +154,7 @@ func (d *ExpandingDecoder) Decode() (Expanded, error) {
 
 		expr := Expanded{
 			Expression: rawExpr,
-			File:       frame.file,
+			File:       d.filePath(frame.file),
 		}
 
 		// Handle the expression (may populate d.pending).
@@ -166,10 +187,15 @@ func (d *ExpandingDecoder) expand(expr Expanded) (*Expanded, error) {
 		if includePath == "" {
 			return nil, &ExpressionError{Expanded: expr, Err: errors.New("include: missing filename")}
 		}
+		if strings.Contains(includePath, "/") {
+			return nil, &ExpressionError{Expanded: expr, Err: fmt.Errorf("include: path %q contains '/'; only root-level includes are allowed", includePath)}
+		}
+		if strings.HasSuffix(includePath, ".linebased") {
+			return nil, &ExpressionError{Expanded: expr, Err: fmt.Errorf("include: path %q has .linebased extension; the extension is not required and will be added automatically", includePath)}
+		}
 
-		// Resolve relative to current file's directory
-		currentFile := d.decoderStack[len(d.decoderStack)-1].file
-		includePath = path.Join(path.Dir(currentFile), includePath)
+		// Add .linebased extension
+		includePath += ".linebased"
 
 		if !d.pushInclude(includePath) {
 			return nil, &ExpressionError{
