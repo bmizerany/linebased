@@ -148,6 +148,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"testing/fstest"
 	"unicode"
 
 	"blake.io/linebased"
@@ -413,15 +414,41 @@ func (s *server) handleHover(msg *request) error {
 	if !ok {
 		return s.reply(msg.ID, nil)
 	}
-	def := doc.defs[name]
-	if def.doc == "" {
+	def, ok := doc.defs[name]
+	if !ok {
 		return s.reply(msg.ID, nil)
 	}
+
+	// Build hover content
+	var content strings.Builder
+	if def.doc != "" {
+		content.WriteString(def.doc)
+	}
+
+	// If this is a call site (not a definition), show expansion
+	if info, isCall := doc.exprAt(p.Position.Line); isCall && info.definedName == "" {
+		if content.Len() > 0 {
+			content.WriteString("\n\n---\n\n")
+		}
+		if def.body == "" {
+			content.WriteString("No expansion")
+		} else {
+			content.WriteString("Expands to:\n```linebased\n")
+			trace := doc.expandTrace(name, info.expr.Body, def)
+			content.WriteString(trace)
+			content.WriteString("```")
+		}
+	}
+
+	if content.Len() == 0 {
+		return s.reply(msg.ID, nil)
+	}
+
 	return s.reply(msg.ID, struct {
 		Contents markupContent `json:"contents"`
 		Range    lspRange      `json:"range,omitempty"`
 	}{
-		Contents: markupContent{Kind: "markdown", Value: def.doc},
+		Contents: markupContent{Kind: "markdown", Value: content.String()},
 		Range:    rng.toLSP(),
 	})
 }
@@ -704,6 +731,7 @@ type definition struct {
 	uri    string   // file URI where definition appears
 	doc    string
 	params []string // parameter names
+	body   string   // template body (for expansion preview)
 	line   int      // 0-indexed line of definition
 }
 
@@ -847,7 +875,7 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 		}
 
 		if expr.Name == "define" {
-			header, _, _ := strings.Cut(expr.Body, "\n")
+			header, body, _ := strings.Cut(expr.Body, "\n")
 			fields := strings.Fields(header)
 			if len(fields) > 0 {
 				name := fields[0]
@@ -856,6 +884,7 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 						uri:    uri,
 						doc:    formatComment(expr.Comment),
 						params: fields[1:],
+						body:   body,
 						line:   expr.Line - 1,
 					}
 				}
@@ -941,6 +970,71 @@ func (d *document) includePathAt(line, char int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// exprAt returns the expression info at the given line, if any.
+func (d *document) exprAt(line int) (exprInfo, bool) {
+	for _, info := range d.exprs {
+		if info.line == line {
+			return info, true
+		}
+	}
+	return exprInfo{}, false
+}
+
+// expandTrace returns the expanded output for the given template call.
+// It creates an in-memory linebased file with the template definition and call,
+// then expands it and returns just the expanded expressions (not the call itself).
+func (d *document) expandTrace(name, args string, def definition) string {
+	// Build an in-memory script with the define and a call
+	var script strings.Builder
+	script.WriteString("define ")
+	script.WriteString(name)
+	if len(def.params) > 0 {
+		script.WriteString(" ")
+		script.WriteString(strings.Join(def.params, " "))
+	}
+	script.WriteString("\n")
+	if def.body != "" {
+		// Body lines need to be indented with tabs
+		for _, line := range strings.Split(def.body, "\n") {
+			if line != "" {
+				script.WriteString("\t")
+				script.WriteString(line)
+				script.WriteString("\n")
+			}
+		}
+	}
+	// Add the call
+	script.WriteString(name)
+	if args != "" {
+		script.WriteString(" ")
+		script.WriteString(strings.TrimSuffix(args, "\n"))
+	}
+	script.WriteString("\n")
+
+	// Expand and capture output (just the expanded expressions)
+	fsys := fstest.MapFS{
+		"hover.linebased": &fstest.MapFile{Data: []byte(script.String())},
+	}
+	dec := linebased.NewExpandingDecoder("hover.linebased", fsys)
+
+	var out strings.Builder
+	for {
+		expr, err := dec.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			break
+		}
+		if expr.Name == "" {
+			continue
+		}
+		out.WriteString(expr.String())
+	}
+
+	return out.String()
 }
 
 func (d *document) references(name string, includeDecl bool) []span {
