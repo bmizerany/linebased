@@ -154,8 +154,8 @@ STDIO VS TCP ANALYSIS:
 
 COMPARISON WITH GOPLS:
 - gopls handles much larger codebases with complex analysis
-- lblsp is ~10-100x faster for comparable operations
-- lblsp has no incremental parsing (full reparse on change)
+- linebased is ~10-100x faster for comparable operations
+- linebased has no incremental parsing (full reparse on change)
 - For .lb files (typically small), full reparse is fine
 
 POTENTIAL OPTIMIZATIONS (not currently needed):

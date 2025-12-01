@@ -6,7 +6,7 @@ if exists('b:did_ftplugin')
 endif
 let b:did_ftplugin = 1
 
-setlocal makeprg=lblsp\ expand\ -fullpath\ %
+setlocal makeprg=linebased\ expand\ -l\ %
 setlocal errorformat=%f:%l:\ %m
 
 let b:undo_ftplugin = 'setl cms< makeprg< errorformat<'
@@ -52,19 +52,19 @@ if has('nvim')
     endif
   endif
 
-  " Check for lblsp once per session
-  if !exists('s:checked_lblsp')
-    let s:checked_lblsp = 1
-    call linebased#check_lblsp()
+  " Check for linebased command once per session
+  if !exists('s:checked_linebased')
+    let s:checked_linebased = 1
+    call linebased#check_linebased()
   endif
 
   lua << EOF
   vim.schedule(function()
-    local lblsp_path = vim.fn.exepath('lblsp')
-    if lblsp_path ~= '' then
+    local linebased_path = vim.fn.exepath('linebased')
+    if linebased_path ~= '' then
       vim.lsp.start({
-        name = 'lblsp',
-        cmd = { lblsp_path },
+        name = 'linebased',
+        cmd = { linebased_path, 'lsp' },
         root_dir = vim.fn.getcwd(),
       })
     end

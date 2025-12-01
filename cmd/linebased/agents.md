@@ -22,13 +22,13 @@ define greet name
 greet World
 ```
 
-## Your Best Friend: lblsp expand
+## Your Best Friend: linebased expand
 
 When working with linebased files, the `expand` subcommand is invaluable.
 Use it liberally to understand what templates produce:
 
 ```bash
-lblsp expand script.linebased
+linebased expand script.linebased
 ```
 
 This shows the fully expanded output with all templates resolved.
@@ -38,7 +38,7 @@ This shows the fully expanded output with all templates resolved.
 When debugging template expansion, add `-x` for shell-style tracing:
 
 ```bash
-lblsp expand -x script.linebased
+linebased expand -x script.linebased
 ```
 
 Output shows each template call with nesting depth:
@@ -51,19 +51,19 @@ echo inner: hello
 The `+` signs show how deep you are in the call stack. This is extremely
 helpful for understanding complex template interactions.
 
-### Location Mode (-fullpath)
+### Location Mode (-l)
 
 For integrating with editors or build systems:
 
 ```bash
-lblsp expand -fullpath script.linebased
+linebased expand -l script.linebased
 ```
 
 Each line is prefixed with `file:line:` for easy navigation.
 
 ## LSP Features
 
-The lblsp server provides:
+The language server (`linebased lsp`) provides:
 
 - **Diagnostics**: Syntax errors and argument count validation
 - **Hover**: Documentation and expansion preview for templates
@@ -74,10 +74,10 @@ The lblsp server provides:
 
 ## Workflow Tips
 
-1. **Start with expand**: Before modifying templates, run `lblsp expand` to
-   see what they currently produce.
+1. **Start with expand**: Before modifying templates, run `linebased expand`
+   to see what they currently produce.
 
-2. **Use trace for debugging**: If output is unexpected, `lblsp expand -x`
+2. **Use trace for debugging**: If output is unexpected, `linebased expand -x`
    shows exactly which template produced what.
 
 3. **Check diagnostics**: The LSP catches common errors like missing

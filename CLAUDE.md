@@ -24,7 +24,7 @@ The `linebased` package parses line-based scripts where each expression has a co
 
 - **Expanded** (`expander.go`): Expression after template expansion, includes source file tracking for error messages.
 
-The LSP server (`cmd/lblsp/`) is a single-file implementation providing diagnostics, hover, and references for `.lb` files.
+The LSP server (`cmd/linebased/`) is a single-file implementation providing diagnostics, hover, and references for `.linebased` files.
 
 ## Code Style
 
