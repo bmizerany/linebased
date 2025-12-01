@@ -1,152 +1,17 @@
 /*
-Command lblsp provides tooling for linebased files: an LSP server for editor
-integration and an expand subcommand for debugging template expansion.
+Command linebased provides tooling for linebased files.
 
-# Installation
+Usage:
 
-To install the latest version of lblsp, run:
+	linebased <command> [arguments]
 
-	go install blake.io/linebased/cmd/lblsp@latest
+The commands are:
 
-# Expand Subcommand
+	agents      print guidance for coding agents
+	expand      expand templates and includes
+	lsp         start the language server
 
-The expand subcommand outputs a linebased file with all templates expanded
-and includes resolved:
-
-	lblsp expand script.linebased
-
-Use the -x flag for shell-style tracing that shows each template call as it
-expands:
-
-	$ lblsp expand -x script.linebased
-	+ script.linebased:7: outer hello
-	++ script.linebased:1: inner hello
-	echo inner: hello
-
-The + signs indicate nesting depth. When outer calls inner which produces echo,
-you see + for outer, ++ for inner, then the final expanded expression.
-
-# Instructions Subcommand
-
-The instructions subcommand prints guidance for coding agents (AI assistants)
-working with linebased files:
-
-	lblsp instructions
-
-This outputs tips on using the expand command, LSP features, and best practices
-for working with linebased templates. Useful for including in system prompts or
-CLAUDE.md files.
-
-# LSP Features
-
-When run without arguments, lblsp starts an LSP server with:
-
-  - Diagnostics: Syntax errors and argument count validation
-  - Hover: Documentation for templates at definition and call sites
-  - Go to Definition: Navigate from template calls to their definitions
-  - Find References: Locate all uses of a template
-  - Rename: Rename a template and all its references
-  - Code Actions: Inline a template call with its expansion
-  - Semantic Tokens: Syntax highlighting for comments, keywords, templates,
-    parameters, and variable expansions
-
-# Editor Setup
-
-lblsp communicates over stdin/stdout using the LSP protocol. Configure your
-editor to run lblsp as the language server for .linebased files.
-
-# Vim / Neovim
-
-Clone the repository and add the editor/vim directory to your runtimepath.
-In your vimrc or init.vim:
-
-	set rtp^=~/src/linebased/editor/vim
-
-Or in init.lua:
-
-	vim.opt.rtp:prepend(vim.fn.expand("~/src/linebased/editor/vim"))
-
-The plugin provides filetype detection, syntax highlighting, and LSP
-integration (Neovim only). It will prompt to install lblsp on first use
-if not found in PATH. See the plugin documentation for key mappings and
-configuration options:
-
-	https://github.com/bmizerany/linebased/blob/main/editor/vim/doc/linebased.txt
-
-Using coc.nvim (alternative to built-in LSP), add to coc-settings.json:
-
-	{
-		"languageserver": {
-			"lblsp": {
-				"command": "lblsp",
-				"filetypes": ["linebased"],
-				"rootPatterns": [".git/"]
-			}
-		}
-	}
-
-# VS Code
-
-Create .vscode/settings.json in your workspace:
-
-	{
-		"lsp.servers": {
-			"lblsp": {
-				"command": "lblsp",
-				"filetypes": ["linebased"]
-			}
-		}
-	}
-
-Or use an extension that supports custom language servers.
-
-# Emacs
-
-Using lsp-mode:
-
-	(add-to-list 'lsp-language-id-configuration '(linebased-mode . "linebased"))
-	(lsp-register-client
-		(make-lsp-client
-			:new-connection (lsp-stdio-connection '("lblsp"))
-			:major-modes '(linebased-mode)
-			:server-id 'lblsp))
-
-Using eglot:
-
-	(add-to-list 'eglot-server-programs '(linebased-mode . ("lblsp")))
-
-# Helix
-
-Add to languages.toml:
-
-	[[language]]
-	name = "linebased"
-	scope = "source.linebased"
-	file-types = ["linebased"]
-	roots = []
-	language-servers = ["lblsp"]
-
-	[language-server.lblsp]
-	command = "lblsp"
-
-# Zed
-
-Add to settings.json:
-
-	{
-		"lsp": {
-			"lblsp": {
-				"binary": {
-					"path": "lblsp"
-				}
-			}
-		},
-		"languages": {
-			"Linebased": {
-				"language_servers": ["lblsp"]
-			}
-		}
-	}
+Use "linebased help <command>" for more information about a command.
 */
 package main
 
@@ -172,8 +37,8 @@ import (
 	"blake.io/linebased"
 )
 
-//go:embed instructions.md
-var instructions string
+//go:embed agents.md
+var agentsDoc string
 
 // JSON-RPC error codes
 const (
@@ -183,19 +48,90 @@ const (
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "expand":
-			if err := runExpand(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "lblsp expand: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "instructions":
-			fmt.Print(instructions)
-			return
-		}
+	flag.Usage = func() {
+		fmt.Fprint(os.Stderr, `Linebased is a tool for working with linebased files.
+
+Usage:
+
+	linebased <command> [arguments]
+
+The commands are:
+
+	expand      expand templates and includes
+	lsp         start the language server
+	agents      print guidance for coding agents
+
+Use "linebased <command> -h" for more information about a command.
+`)
 	}
+	flag.Parse()
+
+	if flag.NArg() < 1 {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	switch flag.Arg(0) {
+	case "agents":
+		runAgents(flag.Args()[1:])
+	case "expand":
+		runExpand(flag.Args()[1:])
+	case "lsp":
+		runLSP(flag.Args()[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "linebased: unknown command %q\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(1)
+	}
+}
+
+func runAgents(args []string) {
+	fs := flag.NewFlagSet("agents", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage: linebased agents
+
+Print guidance for coding agents (AI assistants) working with linebased files.
+The output can be added to CLAUDE.md or system prompts.
+`)
+	}
+	fs.Parse(args)
+	fmt.Print(agentsDoc)
+}
+
+func runLSP(args []string) {
+	fs := flag.NewFlagSet("lsp", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage: linebased lsp
+
+Start the language server. Communicates over stdin/stdout using the LSP
+protocol.
+
+Features:
+
+	Diagnostics       Syntax errors and argument count validation
+	Hover             Documentation for templates at definition and call sites
+	Go to Definition  Navigate from template calls to their definitions
+	Find References   Locate all uses of a template
+	Rename            Rename a template and all its references
+	Code Actions      Inline a template call with its expansion
+	Semantic Tokens   Syntax highlighting for comments, keywords, templates
+
+Editor Setup:
+
+Add the editor/vim directory to your runtimepath. In your vimrc:
+
+	set rtp^=~/src/linebased/editor/vim
+
+Or in init.lua:
+
+	vim.opt.rtp:prepend(vim.fn.expand("~/src/linebased/editor/vim"))
+
+See the plugin documentation for key mappings and configuration:
+
+	https://github.com/bmizerany/linebased/blob/main/editor/vim/doc/linebased.txt
+`)
+	}
+	fs.Parse(args)
 
 	s := &server{
 		r:    bufio.NewReader(os.Stdin),
@@ -207,21 +143,30 @@ func main() {
 		if errors.As(err, &e) {
 			os.Exit(e.code)
 		}
-		fmt.Fprintf(os.Stderr, "lblsp: %v\n", err)
+		fmt.Fprintf(os.Stderr, "linebased lsp: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runExpand(args []string) error {
-	fs := flag.NewFlagSet("expand", flag.ContinueOnError)
-	trace := fs.Bool("x", false, "print expansion steps to stderr")
-	fullpath := fs.Bool("fullpath", false, "prefix each line with file:line: location")
-	if err := fs.Parse(args); err != nil {
-		return err
+func runExpand(args []string) {
+	fs := flag.NewFlagSet("expand", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage: linebased expand [-x] [-l] <file>
+
+Expand outputs a linebased file with all templates expanded and includes
+resolved.
+
+Flags:
+`)
+		fs.PrintDefaults()
 	}
+	trace := fs.Bool("x", false, "trace template expansion to stderr")
+	fullpath := fs.Bool("l", false, "prefix output with file:line: locations")
+	fs.Parse(args)
 
 	if fs.NArg() == 0 {
-		return errors.New("missing filename")
+		fs.Usage()
+		os.Exit(1)
 	}
 	filename := fs.Arg(0)
 
@@ -231,7 +176,8 @@ func runExpand(args []string) error {
 	// Get absolute path and directory for the filesystem root
 	absPath, err := filepath.Abs(filename)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "linebased expand: %v\n", err)
+		os.Exit(1)
 	}
 	dir := filepath.Dir(absPath)
 	base := filepath.Base(absPath)
@@ -250,7 +196,8 @@ func runExpand(args []string) error {
 			break
 		}
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "linebased expand: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Output comment if present
@@ -283,8 +230,6 @@ func runExpand(args []string) error {
 			fmt.Print(expr.String())
 		}
 	}
-
-	return nil
 }
 
 // Server
@@ -378,7 +323,7 @@ func (s *server) handleInitialize(msg *request) error {
 				"full": true
 			}
 		},
-		"serverInfo": {"name": "lblsp"}
+		"serverInfo": {"name": "linebased"}
 	}`
 	return s.replyRaw(msg.ID, json.RawMessage(result))
 }
@@ -724,7 +669,7 @@ func (s *server) publishDiagnostics(doc *document) error {
 		diags[i] = diagnostic{
 			Range:    span{e.line, 0, e.line, lineLen}.toLSP(),
 			Severity: 1,
-			Source:   "lblsp",
+			Source:   "linebased",
 			Message:  e.msg,
 		}
 	}
@@ -877,14 +822,14 @@ type document struct {
 	exprs        []exprInfo
 	defs         map[string]definition
 	errors       []diagError
-	fsys         fs.FS                   // filesystem for resolving includes (nil uses os.DirFS(root))
-	includedExpr map[string][]exprInfo   // expressions from included files, keyed by URI
+	fsys         fs.FS                 // filesystem for resolving includes (nil uses os.DirFS(root))
+	includedExpr map[string][]exprInfo // expressions from included files, keyed by URI
 }
 
 type exprInfo struct {
 	expr        linebased.Expression
-	line        int    // 0-indexed
-	definedName string // for define expressions, the template name
+	line        int            // 0-indexed
+	definedName string         // for define expressions, the template name
 	bodyExprs   []bodyExprInfo // expressions within a define body
 }
 
@@ -894,7 +839,7 @@ type bodyExprInfo struct {
 }
 
 type definition struct {
-	uri    string   // file URI where definition appears
+	uri    string // file URI where definition appears
 	doc    string
 	params []string // parameter names
 	body   string   // template body (for expansion preview)

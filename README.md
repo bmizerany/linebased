@@ -60,10 +60,10 @@ syntax, semantics, and API reference.
 
 ## Tooling
 
-Install lblsp:
+Install the linebased command:
 
 ```
-go install blake.io/linebased/cmd/lblsp@latest
+go install blake.io/linebased/cmd/linebased@latest
 ```
 
 ### Debugging with expand
@@ -71,7 +71,7 @@ go install blake.io/linebased/cmd/lblsp@latest
 See exactly what your templates produce:
 
 ```
-$ lblsp expand script.linebased
+$ linebased expand script.linebased
 echo Hello, Alice!
 echo Hello, Bob!
 ```
@@ -79,7 +79,7 @@ echo Hello, Bob!
 Add `-x` for shell-style tracing that shows each template call as it expands:
 
 ```
-$ lblsp expand -x script.linebased
+$ linebased expand -x script.linebased
 + script.linebased:7: outer hello
 ++ script.linebased:1: inner hello
 echo inner: hello
@@ -90,11 +90,11 @@ The `+` signs show nesting depth—when `outer` calls `inner` which produces
 
 ### Coding agent instructions
 
-For AI coding assistants (Claude, Copilot, etc.), lblsp provides built-in
-instructions:
+For AI coding assistants (Claude, Copilot, etc.), the linebased command
+provides built-in guidance:
 
 ```
-lblsp instructions
+linebased agents
 ```
 
 This outputs guidance on working with linebased files, emphasizing the expand
@@ -108,16 +108,16 @@ Configure Neovim:
 local lspconfig = require("lspconfig")
 local configs = require("lspconfig.configs")
 
-if not configs.lblsp then
-  configs.lblsp = {
+if not configs.linebased then
+  configs.linebased = {
     default_config = {
-      cmd = { "lblsp" },
-      filetypes = { "lb" },
+      cmd = { "linebased", "lsp" },
+      filetypes = { "linebased" },
     },
   }
 end
 
-lspconfig.lblsp.setup({})
+lspconfig.linebased.setup({})
 ```
 
-You'll get diagnostics, hovers, and jump-to-definition for `.lb` files.
+You'll get diagnostics, hovers, and jump-to-definition for `.linebased` files.
