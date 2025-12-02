@@ -543,6 +543,37 @@ func TestLocalDefOverridesInclude(t *testing.T) {
 	}
 }
 
+func TestReferencesAcrossSiblingFiles(t *testing.T) {
+	// Test that references finds calls in sibling .linebased files
+	// in the same directory, even without explicit include statements
+	fsys := fstest.MapFS{
+		"main.linebased": &fstest.MapFile{Data: []byte("define helper\n\techo help\n")},
+		"other.linebased": &fstest.MapFile{Data: []byte("helper\n")},
+	}
+	doc := newDocumentFS("file:///main.linebased", "define helper\n\techo help\n", fsys)
+
+	refs := doc.references("helper", true)
+	// Should find: definition in main.linebased (line 0), call in other.linebased (line 0)
+	if len(refs) != 2 {
+		t.Errorf("references(helper, true): got %d refs, want 2", len(refs))
+		for _, r := range refs {
+			t.Logf("  uri=%s line=%d", r.uri, r.span.startLine)
+		}
+	}
+
+	// Verify we have refs from both files
+	uris := make(map[string]bool)
+	for _, r := range refs {
+		uris[r.uri] = true
+	}
+	if !uris["file:///main.linebased"] {
+		t.Error("missing reference in main file")
+	}
+	if !uris["file:///other.linebased"] {
+		t.Error("missing reference in sibling file")
+	}
+}
+
 func TestRootedIncludes(t *testing.T) {
 	// Test that include paths are rooted at the filesystem root.
 	// Include paths must be simple names (no slashes) and the .linebased

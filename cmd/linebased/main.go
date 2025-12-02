@@ -901,6 +901,9 @@ func (d *document) parse() {
 
 	d.parseFile(d.uri, d.source, d.text, nil)
 
+	// Scan all sibling .linebased files in the directory for the references search
+	d.scanSiblingFiles()
+
 	// Check argument counts and forward references (only for expressions in main file)
 	for _, info := range d.exprs {
 		if info.expr.Name == "" || info.expr.Name == "define" || info.expr.Name == "include" {
@@ -1017,6 +1020,102 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 				d.processInclude(includePath, seen)
 			}
 		}
+	}
+}
+
+// scanSiblingFiles scans all .linebased files in the document's root directory
+// and parses them for the references search. This allows finding references to
+// templates across all files in the same directory, not just included files.
+func (d *document) scanSiblingFiles() {
+	var entries []fs.DirEntry
+	var err error
+	if d.fsys != nil {
+		entries, err = fs.ReadDir(d.fsys, ".")
+	} else {
+		entries, err = os.ReadDir(d.root)
+	}
+	if err != nil {
+		return // silently ignore errors
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".linebased") {
+			continue
+		}
+
+		// Build URI for this sibling file
+		absolutePath := path.Join(d.root, name)
+		siblingURI := "file://" + absolutePath
+
+		// Skip if already processed (main document or included file)
+		if siblingURI == d.uri {
+			continue
+		}
+		if _, processed := d.includedExpr[siblingURI]; processed {
+			continue
+		}
+
+		// Read and parse the sibling file
+		var content []byte
+		if d.fsys != nil {
+			content, err = fs.ReadFile(d.fsys, name)
+		} else {
+			content, err = os.ReadFile(absolutePath)
+		}
+		if err != nil {
+			continue // silently ignore missing/unreadable files
+		}
+
+		// Parse expressions only (don't add definitions - those come from includes)
+		d.parseSiblingFile(siblingURI, string(content))
+	}
+}
+
+// parseSiblingFile parses a sibling file and adds its expressions to includedExpr
+// for the references search. Unlike parseFile, it does not add definitions.
+func (d *document) parseSiblingFile(uri, text string) {
+	dec := linebased.NewDecoder(strings.NewReader(text))
+	for {
+		expr, err := dec.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			continue
+		}
+
+		info := exprInfo{expr: expr, line: expr.Line - 1}
+		if expr.Name == "define" {
+			header, bodyText, _ := strings.Cut(expr.Body, "\n")
+			fields := strings.Fields(header)
+			if len(fields) > 0 {
+				info.definedName = fields[0]
+			}
+			// Parse body expressions for reference search
+			if bodyText != "" {
+				bodyDec := linebased.NewDecoder(strings.NewReader(bodyText))
+				for {
+					bodyExpr, err := bodyDec.Decode()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						break
+					}
+					if bodyExpr.Name != "" {
+						info.bodyExprs = append(info.bodyExprs, bodyExprInfo{
+							name: bodyExpr.Name,
+							line: info.line + bodyExpr.Line,
+						})
+					}
+				}
+			}
+		}
+		d.includedExpr[uri] = append(d.includedExpr[uri], info)
 	}
 }
 
