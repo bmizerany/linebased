@@ -322,6 +322,10 @@ func (d *ExpandingDecoder) expandTemplate(t template, callsite Expanded) (*Expan
 			}
 			expanded = append(expanded, *result)
 		}
+		// Collect any pending expressions from nested template expansion
+		// to maintain correct ordering.
+		expanded = append(expanded, d.pending...)
+		d.pending = nil
 	}
 
 	if len(expanded) == 0 {
