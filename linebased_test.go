@@ -505,6 +505,48 @@ func TestExpandInclude(t *testing.T) {
 	})
 }
 
+func TestNestedTemplateOrdering(t *testing.T) {
+	// Test that nested template expansions are yielded in the correct order.
+	// Previously, when a template called another template, the inner template's
+	// expressions were queued to d.pending before the outer template finished,
+	// causing expressions to be yielded in the wrong order.
+	const script = `define inner p
+	first $p
+	second $p
+
+define outer x
+	before $x
+	inner $x
+	after $x
+
+outer test
+`
+	fsys := fstest.MapFS{"test.lb": &fstest.MapFile{Data: []byte(script)}}
+	d := NewExpandingDecoder("test.lb", fsys)
+
+	var got []string
+	for {
+		expr, err := d.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Decode error: %v", err)
+		}
+		if expr.Name == "" {
+			continue
+		}
+		got = append(got, expr.Name)
+	}
+
+	// The correct order is: before, first, second, after
+	// Previously this was: before, second, first, after (inner template reversed)
+	want := []string{"before", "first", "second", "after"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("nested template ordering:\n got %v\nwant %v", got, want)
+	}
+}
+
 var useAbsPaths = sync.OnceValue(func() bool {
 	f := flag.Lookup("test.fullpath")
 	return f != nil && f.Value.String() == "true"
