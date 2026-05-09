@@ -35,6 +35,26 @@ the only form of abstraction provided. Templates cannot recurse, cannot redefine
 themselves, and cannot produce new definitions. These restrictions prevent the
 language from becoming a programming language.
 
+Template parameters can be marked optional with a trailing `?`. The `?` is part
+of the parameter name in the template body, and optional parameters must be the
+final parameters in the signature.
+
+```
+define greet name title?
+	echo Hello, $title? $name
+
+greet Alice
+greet Bob Dr.
+```
+
+The first call expands `$title?` to an empty value. This is invalid because a
+required parameter follows an optional one:
+
+```
+define bad first? last
+	echo $first? $last
+```
+
 The LSP server provides diagnostics, hover, and jump-to-definition. Editor
 support matters.
 
@@ -48,6 +68,13 @@ define greet name
 # Use it
 greet Alice
 greet Bob
+
+# Optional parameters are written with ? and must be trailing
+define announce subject suffix?
+	echo $subject$suffix?
+
+announce ready
+announce ready !
 
 # Include shared definitions (extension added automatically)
 include helpers

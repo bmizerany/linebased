@@ -77,6 +77,21 @@
 //	define shout word
 //		echo ${word}!!!
 //
+// Parameters ending in "?" are optional. The "?" is part of the parameter name,
+// so template bodies refer to $suffix? or ${suffix?}. Missing optional
+// arguments expand to empty strings:
+//
+//	define greet name suffix?
+//		echo Hello, $name$suffix?
+//	greet Alice          # echo Hello, Alice
+//	greet Alice !        # echo Hello, Alice!
+//
+// Optional parameters must form a suffix of the parameter list. A required
+// parameter cannot follow an optional one:
+//
+//	define bad first? last
+//		echo $first? $last
+//
 // Templates can invoke other templates:
 //
 //	define inner x

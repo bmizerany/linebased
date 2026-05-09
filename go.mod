@@ -1,6 +1,6 @@
 module blake.io/linebased
 
-go 1.25.2
+go 1.25.0
 
 require (
 	github.com/ericchiang/css v1.4.0

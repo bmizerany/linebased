@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -420,7 +421,7 @@ func (s *server) handleHover(msg *request) error {
 	content.WriteString(name)
 	for _, param := range def.params {
 		content.WriteString(" ")
-		content.WriteString(param)
+		content.WriteString(string(param))
 	}
 	content.WriteString("\n```")
 
@@ -841,9 +842,9 @@ type bodyExprInfo struct {
 type definition struct {
 	uri    string // file URI where definition appears
 	doc    string
-	params []string // parameter names
-	body   string   // template body (for expansion preview)
-	line   int      // 0-indexed line of definition
+	params params // parameter names
+	body   string // template body (for expansion preview)
+	line   int    // 0-indexed line of definition
 }
 
 type diagError struct {
@@ -918,13 +919,8 @@ func (d *document) parse() {
 			})
 			continue
 		}
-		numParams := len(def.params)
-		numArgs := 0
-		for _, a := range info.expr.ParseArgs(numParams + 1) {
-			if strings.TrimSpace(a) != "" {
-				numArgs++
-			}
-		}
+		numParams := requiredParamCount(def.params)
+		numArgs := countArgs(info.expr.Body, len(def.params)+1)
 		if numArgs < numParams {
 			d.errors = append(d.errors, diagError{
 				line: info.line,
@@ -1001,11 +997,21 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 			fields := strings.Fields(header)
 			if len(fields) > 0 {
 				name := fields[0]
+				params := parseParams(fields[1:])
+				if required, optional, ok := invalidOptionalOrder(params); ok {
+					if uri == d.uri {
+						d.errors = append(d.errors, diagError{
+							line: expr.Line - 1,
+							msg:  fmt.Sprintf("required parameter %q follows optional parameter %q", required, optional),
+						})
+					}
+					continue
+				}
 				if _, exists := d.defs[name]; !exists {
 					d.defs[name] = definition{
 						uri:    uri,
 						doc:    formatComment(expr.Comment),
-						params: fields[1:],
+						params: params,
 						body:   body,
 						line:   expr.Line - 1,
 					}
@@ -1114,7 +1120,7 @@ func (d *document) expandTrace(name, args string, def definition) string {
 	script.WriteString(name)
 	if len(def.params) > 0 {
 		script.WriteString(" ")
-		script.WriteString(strings.Join(def.params, " "))
+		script.WriteString(joinParams(def.params))
 	}
 	script.WriteString("\n")
 	if def.body != "" {
@@ -1237,17 +1243,18 @@ func (d *document) semanticTokens() []uint32 {
 		if info.definedName != "" {
 			start := nameLen + 1
 			tokens = append(tokens, semToken{info.line, start, utf16Len(info.definedName), tokFunction})
+			def, defined := d.defs[info.definedName]
 			// Parameters after the template name
-			if def, ok := d.defs[info.definedName]; ok {
+			if defined {
 				pos := start + utf16Len(info.definedName)
 				header, _, _ := strings.Cut(info.expr.Body, "\n")
 				rest := header[len(info.definedName):]
 				for _, param := range def.params {
 					// Find param in rest
-					idx := strings.Index(rest, param)
+					idx := strings.Index(rest, string(param))
 					if idx >= 0 {
 						paramStart := pos + utf16Len(rest[:idx])
-						tokens = append(tokens, semToken{info.line, paramStart, utf16Len(param), tokParameter})
+						tokens = append(tokens, semToken{info.line, paramStart, utf16Len(string(param)), tokParameter})
 					}
 				}
 			}
@@ -1275,7 +1282,7 @@ func (d *document) semanticTokens() []uint32 {
 					tokens = append(tokens, semToken{docLine, 1, utf16Len(bodyExpr.Name), tokFunction})
 					// Scan for variable expansions in the body line
 					if docLine < len(d.lines) {
-						tokens = append(tokens, scanVariables(docLine, d.lines[docLine], tokVariable)...)
+						tokens = append(tokens, scanVariables(docLine, d.lines[docLine], tokVariable, def.params)...)
 					}
 				}
 			}
@@ -1311,7 +1318,7 @@ type semToken struct {
 }
 
 // scanVariables finds $name and ${name} patterns in a line.
-func scanVariables(lineNum int, line string, tokType int) []semToken {
+func scanVariables(lineNum int, line string, tokType int, params params) []semToken {
 	var tokens []semToken
 	i := 0
 	for i < len(line) {
@@ -1341,6 +1348,9 @@ func scanVariables(lineNum int, line string, tokType int) []semToken {
 			// $name
 			nameStart := i
 			for i < len(line) && isIdentContinue(line[i]) {
+				i++
+			}
+			if i < len(line) && line[i] == '?' && params.contains(line[nameStart:i]+"?") {
 				i++
 			}
 			if i > nameStart {
@@ -1375,6 +1385,71 @@ func formatComment(comment string) string {
 		lines = lines[:len(lines)-1]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func countArgs(s string, n int) int {
+	var count int
+	for _, arg := range linebased.ParseArgs(s, n) {
+		if strings.TrimSpace(arg) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+type param string
+
+func (p param) optional() bool {
+	return strings.HasSuffix(string(p), "?")
+}
+
+type params []param
+
+func parseParams(fields []string) params {
+	params := make(params, len(fields))
+	for i, field := range fields {
+		params[i] = param(field)
+	}
+	return params
+}
+
+func (p params) contains(name string) bool {
+	return slices.Contains(p, param(name))
+}
+
+func joinParams(params params) string {
+	var b strings.Builder
+	for i, param := range params {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(string(param))
+	}
+	return b.String()
+}
+
+func requiredParamCount(params params) int {
+	for i, param := range params {
+		if param.optional() {
+			return i
+		}
+	}
+	return len(params)
+}
+
+func invalidOptionalOrder(params params) (required, optional param, ok bool) {
+	for _, param := range params {
+		if param.optional() {
+			if optional == "" {
+				optional = param
+			}
+			continue
+		}
+		if optional != "" {
+			return param, optional, true
+		}
+	}
+	return "", "", false
 }
 
 func utf16Len(s string) int {

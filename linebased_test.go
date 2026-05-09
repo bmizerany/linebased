@@ -292,7 +292,7 @@ func TestExpressionsCommentCapture(t *testing.T) {
 	}
 }
 
-func ExampleExpand() {
+func Example_expansion() {
 	const script = "" +
 		"define echo tail\n" +
 		"define greet name\n" +
@@ -326,10 +326,10 @@ func ExampleExpand() {
 	// echo Hello, Bob!
 }
 
-// ExampleExpand_include shows how includes let you share templates
+// Example_include shows how includes let you share templates
 // across scripts. The main script includes a library file that defines
 // reusable templates, then uses those templates.
-func ExampleExpand_include() {
+func Example_include() {
 	fsys := fstest.MapFS{
 		"main.lb": &fstest.MapFile{Data: []byte("" +
 			"include greetings\n" +
@@ -369,12 +369,12 @@ func ExampleExpand_include() {
 func TestExpandInclude(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		fsys := fstest.MapFS{
-			"main.lb":          &fstest.MapFile{Data: []byte("include other\n")},
-			"other.linebased":  &fstest.MapFile{Data: []byte("define echo tail\necho hi\n")},
+			"main.linebased":  &fstest.MapFile{Data: []byte("include other\n")},
+			"other.linebased": &fstest.MapFile{Data: []byte("define echo tail\necho hi\n")},
 		}
 
 		var got []string
-		d := NewExpandingDecoder("main.lb", fsys)
+		d := NewExpandingDecoder("main.linebased", fsys)
 		for {
 			expr, err := d.Decode()
 			if err == io.EOF {
@@ -426,9 +426,9 @@ func TestExpandInclude(t *testing.T) {
 
 	t.Run("cycle", func(t *testing.T) {
 		fsys := fstest.MapFS{
-			"main.lb":          &fstest.MapFile{Data: []byte("include a\n")},
-			"a.linebased":      &fstest.MapFile{Data: []byte("include b\n")},
-			"b.linebased":      &fstest.MapFile{Data: []byte("include a\n")},
+			"main.linebased": &fstest.MapFile{Data: []byte("include a\n")},
+			"a.linebased":    &fstest.MapFile{Data: []byte("include b\n")},
+			"b.linebased":    &fstest.MapFile{Data: []byte("include a\n")},
 		}
 		var gotErr error
 		d := NewExpandingDecoder("main.lb", fsys)
@@ -544,6 +544,158 @@ outer test
 	want := []string{"before", "first", "second", "after"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("nested template ordering:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestTemplateOptionalParams(t *testing.T) {
+	tests := []struct {
+		name    string
+		script  string
+		want    []string
+		wantErr string
+	}{
+		{
+			name: "single trailing optional omitted",
+			script: "" +
+				"define collect a b c?\n" +
+				"\tout $a\n" +
+				"\tout $b\n" +
+				"\tout $c?\n" +
+				"collect A B\n",
+			want: []string{"out A\n", "out B\n", "out\n"},
+		},
+		{
+			name: "trailing optional omitted",
+			script: "" +
+				"define collect a b? c?\n" +
+				"\tout $a\n" +
+				"\tout $b?\n" +
+				"\tout $c?\n" +
+				"collect A\n",
+			want: []string{"out A\n", "out\n", "out\n"},
+		},
+		{
+			name: "trailing optional supplied left to right",
+			script: "" +
+				"define collect a b? c?\n" +
+				"\tout $a\n" +
+				"\tout $b?\n" +
+				"\tout $c?\n" +
+				"collect A B\n",
+			want: []string{"out A\n", "out B\n", "out\n"},
+		},
+		{
+			name: "all optional omitted",
+			script: "" +
+				"define collect a? b? c?\n" +
+				"\tout $a?\n" +
+				"\tout $b?\n" +
+				"\tout $c?\n" +
+				"collect\n",
+			want: []string{"out\n", "out\n", "out\n"},
+		},
+		{
+			name: "question mark remains part of optional param name",
+			script: "" +
+				"define collect a?\n" +
+				"\tout $a?\n" +
+				"collect A\n",
+			want: []string{"out A\n"},
+		},
+		{
+			name: "question mark after required param stays punctuation",
+			script: "" +
+				"define ask name\n" +
+				"\tout $name?\n" +
+				"ask Alice\n",
+			want: []string{"out Alice?\n"},
+		},
+		{
+			name: "required omitted before optional",
+			script: "" +
+				"define collect a b?\n" +
+				"\tout $a\n" +
+				"collect\n",
+			wantErr: `test.lb:3: template "collect" expects at least 1 arguments, got 0`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.MapFS{"test.lb": &fstest.MapFile{Data: []byte(tt.script)}}
+			d := NewExpandingDecoder("test.lb", fsys)
+
+			var got []string
+			var gotErr error
+			for {
+				expr, err := d.Decode()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					gotErr = err
+					break
+				}
+				if expr.Name == "" {
+					continue
+				}
+				got = append(got, expr.String())
+			}
+
+			if tt.wantErr != "" {
+				if gotErr == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if gotErr.Error() != tt.wantErr {
+					t.Fatalf("unexpected error:\n got %q\nwant %q", gotErr.Error(), tt.wantErr)
+				}
+				return
+			}
+			if gotErr != nil {
+				t.Fatalf("Decode error: %v", gotErr)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("expanded output:\n got %v\nwant %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTemplateOptionalParamOrder(t *testing.T) {
+	tests := []struct {
+		name   string
+		define string
+		want   string
+	}{
+		{
+			name:   "first optional then required",
+			define: "define bad a? b\n\tout\n",
+			want:   `test.lb:1: define: required parameter "b" follows optional parameter "a?"`,
+		},
+		{
+			name:   "middle optional then required",
+			define: "define bad a b? c\n\tout\n",
+			want:   `test.lb:1: define: required parameter "c" follows optional parameter "b?"`,
+		},
+		{
+			name:   "optional required optional",
+			define: "define bad a? b c?\n\tout\n",
+			want:   `test.lb:1: define: required parameter "b" follows optional parameter "a?"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.MapFS{"test.lb": &fstest.MapFile{Data: []byte(tt.define)}}
+			d := NewExpandingDecoder("test.lb", fsys)
+			_, err := d.Decode()
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tt.want)
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("unexpected error:\n got %q\nwant %q", err.Error(), tt.want)
+			}
+		})
 	}
 }
 

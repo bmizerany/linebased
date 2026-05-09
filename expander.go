@@ -78,7 +78,7 @@ func NewExpandingDecoder(name string, fsys fs.FS) *ExpandingDecoder {
 		defs: make(map[string]template),
 	}
 
-	f, err := fsys.Open(name)
+	f, err := openRoot(fsys, name)
 	if err != nil {
 		d.err = &ExpressionError{
 			Expanded: Expanded{Expression: Expression{Line: 1}, File: name},
@@ -248,12 +248,28 @@ func (d *ExpandingDecoder) expandTemplate(t template, callsite Expanded) (*Expan
 	}
 	defer d.callStack.pop()
 
-	args := ParseArgs(callsite.Body, len(t.params))
-	if len(args) != len(t.params) {
+	args := callArgs(callsite.Body, len(t.params))
+	if len(args) < t.required {
+		if t.required == len(t.params) {
+			return nil, &ExpressionError{
+				Expanded: callsite,
+				Err:      fmt.Errorf("template %q expects %d arguments, got %d", t.name, len(t.params), len(args)),
+			}
+		}
 		return nil, &ExpressionError{
 			Expanded: callsite,
-			Err:      fmt.Errorf("template %q expects %d arguments, got %d", t.name, len(t.params), len(args)),
+			Err:      fmt.Errorf("template %q expects at least %d arguments, got %d", t.name, t.required, len(args)),
 		}
+	}
+	for len(args) < len(t.params) {
+		args = append(args, "")
+	}
+
+	lookup := func(name string) string {
+		if i := t.params.index(name); i >= 0 {
+			return args.At(i)
+		}
+		return ""
 	}
 
 	// Decode template body and substitute parameters.
@@ -282,24 +298,15 @@ func (d *ExpandingDecoder) expandTemplate(t template, callsite Expanded) (*Expan
 		}
 
 		// Substitute parameters.
-		var unknownParam string
-		getParam := func(name string) string {
-			if i := slices.Index(t.params, name); i >= 0 {
-				return strings.TrimSuffix(args[i], "\n")
-			}
-			if unknownParam == "" {
-				unknownParam = name
-			}
-			return ""
+		var unknown string
+		expr.Name, unknown = t.expand(expr.Name, lookup)
+		if unknown == "" {
+			expr.Body, unknown = t.expand(expr.Body, lookup)
 		}
-
-		expr.Name = os.Expand(expr.Name, getParam)
-		expr.Body = os.Expand(expr.Body, getParam)
-
-		if unknownParam != "" {
+		if unknown != "" {
 			return nil, &ExpressionError{
 				Expanded: t.Expanded,
-				Err:      fmt.Errorf("unknown parameter reference: %q", unknownParam),
+				Err:      fmt.Errorf("unknown parameter reference: %q", unknown),
 			}
 		}
 
@@ -349,6 +356,21 @@ func (d *ExpandingDecoder) define(expr Expanded) error {
 	return nil
 }
 
+func openRoot(fsys fs.FS, name string) (fs.File, error) {
+	f, err := fsys.Open(name)
+	if err == nil {
+		return f, nil
+	}
+	stem, ok := strings.CutSuffix(name, ".lb")
+	if !ok {
+		return nil, err
+	}
+	if f, err2 := fsys.Open(stem + ".linebased"); err2 == nil {
+		return f, nil
+	}
+	return nil, err
+}
+
 func (d *ExpandingDecoder) pushInclude(name string) bool {
 	if slices.Contains(d.includeStack, name) {
 		return false
@@ -376,9 +398,10 @@ func (d *ExpandingDecoder) includeCycle(next string) string {
 type template struct {
 	Expanded
 
-	name   string
-	params []string
-	body   string
+	name     string
+	params   params
+	required int
+	body     string
 }
 
 func makeTemplate(decl Expanded) (template, error) {
@@ -396,14 +419,126 @@ func makeTemplate(decl Expanded) (template, error) {
 		return template{}, fmt.Errorf("define: name contains invalid characters: %q", name)
 	}
 
-	params := Args(strings.Fields(rest))
+	params := parseParams(rest)
+	required, err := params.required()
+	if err != nil {
+		return template{}, err
+	}
 	t := template{
 		Expanded: decl,
 		name:     name,
 		params:   params,
+		required: required,
 		body:     body,
 	}
 	return t, nil
+}
+
+func callArgs(s string, n int) Args {
+	args := ParseArgs(s, n)
+	for len(args) > 0 && strings.TrimSpace(args[len(args)-1]) == "" {
+		args = args[:len(args)-1]
+	}
+	return args
+}
+
+type param string
+
+func (p param) optional() bool {
+	return strings.HasSuffix(string(p), "?")
+}
+
+type params []param
+
+func parseParams(s string) params {
+	fields := strings.Fields(s)
+	ps := make(params, len(fields))
+	for i, field := range fields {
+		ps[i] = param(field)
+	}
+	return ps
+}
+
+func (p params) index(name string) int {
+	return slices.Index(p, param(name))
+}
+
+func (p params) contains(name string) bool {
+	return p.index(name) >= 0
+}
+
+func (p params) required() (int, error) {
+	required := len(p)
+	var optional param
+	for i, param := range p {
+		if param.optional() {
+			if optional == "" {
+				optional = param
+				required = i
+			}
+			continue
+		}
+		if optional != "" {
+			return 0, fmt.Errorf("define: required parameter %q follows optional parameter %q", param, optional)
+		}
+	}
+	return required, nil
+}
+
+func (t template) expand(s string, lookup func(string) string) (string, string) {
+	var unknown string
+	out := os.Expand(t.braceOptionalRefs(s), func(name string) string {
+		if !t.params.contains(name) && unknown == "" {
+			unknown = name
+		}
+		return lookup(name)
+	})
+	return out, unknown
+}
+
+func (t template) braceOptionalRefs(s string) string {
+	var b strings.Builder
+	var changed bool
+	start := 0
+	for i := 0; i+1 < len(s); i++ {
+		if s[i] != '$' || s[i+1] == '{' || !isNameStart(s[i+1]) {
+			continue
+		}
+		j := i + 2
+		for j < len(s) && isNameContinue(s[j]) {
+			j++
+		}
+		if j >= len(s) || s[j] != '?' {
+			continue
+		}
+		name := s[i+1 : j+1]
+		if !t.params.contains(name) {
+			continue
+		}
+		if !changed {
+			b.Grow(len(s) + 2)
+			changed = true
+		}
+		b.WriteString(s[start:i])
+		b.WriteString("${")
+		b.WriteString(name)
+		b.WriteByte('}')
+		i = j
+		start = j + 1
+	}
+	if !changed {
+		return s
+	}
+	b.WriteString(s[start:])
+	return b.String()
+}
+
+func isNameStart(c byte) bool {
+	return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
+func isNameContinue(c byte) bool {
+	return isNameStart(c) || '0' <= c && c <= '9'
 }
 
 // stack tracks template expansion call chains for debugging and error reporting.

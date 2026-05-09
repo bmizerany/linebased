@@ -61,6 +61,27 @@ func TestDocumentParse(t *testing.T) {
 			wantDefs: []string{"add"},
 		},
 		{
+			name:     "optional param omitted",
+			text:     "define greet name suffix?\n\techo\ngreet Alice\n",
+			wantDefs: []string{"greet"},
+		},
+		{
+			name:     "all optional params omitted",
+			text:     "define greet name? suffix?\n\techo\ngreet\n",
+			wantDefs: []string{"greet"},
+		},
+		{
+			name:       "required param omitted before optional",
+			text:       "define greet name suffix?\n\techo\ngreet\n",
+			wantDefs:   []string{"greet"},
+			wantErrors: []string{"greet requires 1 argument(s), got 0"},
+		},
+		{
+			name:       "optional before required",
+			text:       "define greet name? suffix\n\techo\n",
+			wantErrors: []string{`required parameter "suffix" follows optional parameter "name?"`},
+		},
+		{
 			name:       "used before defined",
 			text:       "foo\n\ndefine foo\n\tbar\n",
 			wantDefs:   []string{"foo"},
@@ -322,6 +343,25 @@ func TestSemanticTokensDefineWithVars(t *testing.T) {
 	}
 }
 
+func TestSemanticTokensOptionalVariable(t *testing.T) {
+	doc := newDocument("file:///test.lb", "define foo x?\n\thello $x?\n")
+	tokens := doc.semanticTokens()
+
+	line, char := 0, 0
+	for i := 0; i < len(tokens); i += 5 {
+		line += int(tokens[i])
+		if tokens[i] > 0 {
+			char = int(tokens[i+1])
+		} else {
+			char += int(tokens[i+1])
+		}
+		if line == 1 && char == 7 && tokens[i+2] == 3 && tokens[i+3] == 5 {
+			return
+		}
+	}
+	t.Fatalf("missing variable token for $x? in %#v", tokens)
+}
+
 func TestSemanticTokensInclude(t *testing.T) {
 	// include should be a keyword
 	doc := newDocument("file:///test.lb", "include other.lb\n")
@@ -396,6 +436,27 @@ func TestExpandTrace(t *testing.T) {
 	want := "echo Hello, Alice!\n"
 	if trace != want {
 		t.Errorf("expandTrace:\n got: %q\nwant: %q", trace, want)
+	}
+}
+
+func TestExpandTraceOptionalParam(t *testing.T) {
+	text := "define greet name suffix?\n\techo $name$suffix?\ngreet Alice\n"
+	doc := newDocument("file:///test.linebased", text)
+
+	def, ok := doc.defs["greet"]
+	if !ok {
+		t.Fatal("greet definition not found")
+	}
+
+	info, ok := doc.exprAt(2)
+	if !ok {
+		t.Fatal("expression at line 2 not found")
+	}
+
+	trace := doc.expandTrace("greet", info.expr.Body, def)
+	want := "echo Alice\n"
+	if trace != want {
+		t.Errorf("expandTrace optional:\n got: %q\nwant: %q", trace, want)
 	}
 }
 

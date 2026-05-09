@@ -9,6 +9,7 @@ Linebased scripts have a beautifully simple structure:
 
 - Each line is a command name followed by its body
 - Template definitions use `define name params...` with tab-indented bodies
+- Optional template parameters end in `?` and must be trailing
 - File inclusion uses `include path` (extension added automatically)
 - Comments start with `#`
 - That's it. No escaping, no quoting, no surprises.
@@ -20,6 +21,24 @@ define greet name
 	echo Hello, $name!
 
 greet World
+```
+
+Optional parameters keep the `?` in the body reference:
+```
+define greet name title?
+	echo Hello, $title? $name
+
+greet Alice
+greet Bob Dr.
+```
+
+All parameters after an optional parameter must also be optional:
+```
+define ok first second? third?
+	echo $first $second? $third?
+
+define bad first? second
+	echo $first? $second
 ```
 
 ## Your Best Friend: linebased expand
