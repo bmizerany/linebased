@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"testing"
 	"testing/fstest"
 )
@@ -460,6 +463,39 @@ func TestExpandTraceOptionalParam(t *testing.T) {
 	}
 }
 
+func TestHoverSignatureMarksOnlyOptionalParamOptional(t *testing.T) {
+	const uri = "file:///test.linebased"
+	doc := newDocument(uri, "define maybe x?\n\techo $x?\nmaybe\n")
+
+	var out bytes.Buffer
+	s := &server{
+		w:    bufio.NewWriter(&out),
+		docs: map[string]*document{uri: doc},
+	}
+	params, err := json.Marshal(struct {
+		TextDocument textDocumentIdentifier `json:"textDocument"`
+		Position     position               `json:"position"`
+	}{
+		TextDocument: textDocumentIdentifier{URI: uri},
+		Position:     position{Line: 2, Character: 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handleHover(&request{ID: json.RawMessage(`1`), Params: params}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := hoverResponseValue(t, out.Bytes())
+	want := "```linebased\nmaybe [x?]\n```"
+	if !contains(got, want) {
+		t.Fatalf("hover signature:\n got: %q\nwant to contain: %q", got, want)
+	}
+	if unwanted := "```linebased\nmaybe x?\n```"; contains(got, unwanted) {
+		t.Fatalf("hover signature marks optional param as required:\n got: %q", got)
+	}
+}
+
 func TestExpandTraceMultiLine(t *testing.T) {
 	// Template that expands to multiple lines
 	text := "define setup\n\techo one\n\techo two\nsetup\n"
@@ -506,6 +542,23 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func hoverResponseValue(t *testing.T, msg []byte) string {
+	t.Helper()
+	_, body, ok := bytes.Cut(msg, []byte("\r\n\r\n"))
+	if !ok {
+		t.Fatalf("missing LSP header separator in %q", msg)
+	}
+	var resp struct {
+		Result struct {
+			Contents markupContent `json:"contents"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Result.Contents.Value
 }
 
 func TestDefinitionFromInclude(t *testing.T) {

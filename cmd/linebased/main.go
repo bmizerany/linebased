@@ -421,7 +421,13 @@ func (s *server) handleHover(msg *request) error {
 	content.WriteString(name)
 	for _, param := range def.params {
 		content.WriteString(" ")
-		content.WriteString(string(param))
+		if param.optional() {
+			content.WriteString("[")
+			content.WriteString(string(param))
+			content.WriteString("]")
+		} else {
+			content.WriteString(string(param))
+		}
 	}
 	content.WriteString("\n```")
 
