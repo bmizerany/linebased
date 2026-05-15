@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -120,7 +121,7 @@ func TestDocumentParse(t *testing.T) {
 			}
 			for i, want := range tt.wantErrors {
 				if i < len(gotErrors) {
-					if got := gotErrors[i]; got != want && !contains(got, want) {
+					if got := gotErrors[i]; got != want && !strings.Contains(got, want) {
 						t.Errorf("error[%d]: got %q, want to contain %q", i, got, want)
 					}
 				}
@@ -488,10 +489,10 @@ func TestHoverSignatureMarksOnlyOptionalParamOptional(t *testing.T) {
 
 	got := hoverResponseValue(t, out.Bytes())
 	want := "```linebased\nmaybe [x?]\n```"
-	if !contains(got, want) {
+	if !strings.Contains(got, want) {
 		t.Fatalf("hover signature:\n got: %q\nwant to contain: %q", got, want)
 	}
-	if unwanted := "```linebased\nmaybe x?\n```"; contains(got, unwanted) {
+	if unwanted := "```linebased\nmaybe x?\n```"; strings.Contains(got, unwanted) {
 		t.Fatalf("hover signature marks optional param as required:\n got: %q", got)
 	}
 }
@@ -598,20 +599,6 @@ func TestSpanToLSP(t *testing.T) {
 	if got != want {
 		t.Errorf("span.toLSP() = %v, want %v", got, want)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func lspMessageBody(t *testing.T, msg []byte) []byte {

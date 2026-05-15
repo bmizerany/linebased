@@ -17,6 +17,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing/fstest"
@@ -449,7 +449,7 @@ func (s *server) handleHover(msg *request) error {
 
 	return s.reply(msg.ID, struct {
 		Contents markupContent `json:"contents"`
-		Range    lspRange      `json:"range,omitempty"`
+		Range    lspRange      `json:"range"`
 	}{
 		Contents: markupContent{Kind: "markdown", Value: content.String()},
 		Range:    rng.toLSP(),
@@ -1019,7 +1019,8 @@ func (d *document) parseFile(uri, source, text string, seen map[string]bool) {
 				}
 			}
 		} else if expr.Name == "include" {
-			includePath := strings.TrimSpace(strings.Split(expr.Body, "\n")[0])
+			includePath, _, _ := strings.Cut(expr.Body, "\n")
+			includePath = strings.TrimSpace(includePath)
 			if includePath != "" {
 				d.processInclude(includePath, seen)
 			}
@@ -1092,7 +1093,8 @@ func (d *document) includePathAt(line, char int) (string, bool) {
 		}
 		// Include path starts after "include "
 		start := utf16Len("include ")
-		includePath := strings.TrimSpace(strings.Split(info.expr.Body, "\n")[0])
+		includePath, _, _ := strings.Cut(info.expr.Body, "\n")
+		includePath = strings.TrimSpace(includePath)
 		length := utf16Len(includePath)
 		if char >= start && char < start+length {
 			return includePath, true
@@ -1135,7 +1137,7 @@ func (d *document) expandTrace(name, args string, def definition) string {
 	script.WriteString("\n")
 	if def.body != "" {
 		// Body lines need to be indented with tabs
-		for _, line := range strings.Split(def.body, "\n") {
+		for line := range strings.SplitSeq(def.body, "\n") {
 			if line != "" {
 				script.WriteString("\t")
 				script.WriteString(line)
@@ -1187,7 +1189,7 @@ func writeLinebasedExpr(b *strings.Builder, name, body string) {
 	if !multiline {
 		return
 	}
-	for _, line := range strings.Split(tail, "\n") {
+	for line := range strings.SplitSeq(tail, "\n") {
 		b.WriteByte('\t')
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -1318,11 +1320,11 @@ func (d *document) semanticTokens() []uint32 {
 		}
 	}
 
-	sort.Slice(tokens, func(i, j int) bool {
-		if tokens[i].line != tokens[j].line {
-			return tokens[i].line < tokens[j].line
+	slices.SortFunc(tokens, func(a, b semToken) int {
+		if a.line != b.line {
+			return cmp.Compare(a.line, b.line)
 		}
-		return tokens[i].start < tokens[j].start
+		return cmp.Compare(a.start, b.start)
 	})
 
 	if len(tokens) == 0 {
@@ -1403,7 +1405,7 @@ func isIdentContinue(b byte) bool {
 
 func formatComment(comment string) string {
 	var lines []string
-	for _, line := range strings.Split(strings.TrimSuffix(comment, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(comment, "\n"), "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
 		lines = append(lines, line)
 	}
