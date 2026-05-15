@@ -704,11 +704,11 @@ var useAbsPaths = sync.OnceValue(func() bool {
 	return f != nil && f.Value.String() == "true"
 })
 
-//go:embed testdata/*.lb testdata/*.linebased
+//go:embed testdata/*.linebased
 var scripts embed.FS
 
 func TestExpandingDecoder(t *testing.T) {
-	files, err := fs.Glob(scripts, "testdata/*.lb")
+	files, err := fs.Glob(scripts, "testdata/*.linebased")
 	if err != nil {
 		t.Fatalf("glob testdata/*.txt: %v", err)
 	}
