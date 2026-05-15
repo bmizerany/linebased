@@ -496,6 +496,19 @@ func TestHoverSignatureMarksOnlyOptionalParamOptional(t *testing.T) {
 	}
 }
 
+func TestReplyNilIncludesResultNull(t *testing.T) {
+	var out bytes.Buffer
+	s := &server{w: bufio.NewWriter(&out)}
+	if err := s.reply(json.RawMessage(`1`), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	body := lspMessageBody(t, out.Bytes())
+	if !bytes.Contains(body, []byte(`"result":null`)) {
+		t.Fatalf("nil reply body = %s, want result:null", body)
+	}
+}
+
 func TestExpandTraceMultiLine(t *testing.T) {
 	// Template that expands to multiple lines
 	text := "define setup\n\techo one\n\techo two\nsetup\n"
@@ -515,6 +528,63 @@ func TestExpandTraceMultiLine(t *testing.T) {
 	want := "echo one\necho two\n"
 	if trace != want {
 		t.Errorf("expandTrace multi-line:\n got: %q\nwant: %q", trace, want)
+	}
+}
+
+func TestCodeActionInlineTemplate(t *testing.T) {
+	const uri = "file:///test.linebased"
+	doc := newDocument(uri, "define greet name\n\techo Hello, $name!\ngreet Alice\n")
+
+	action := inlineCodeAction(t, uri, doc, lspRange{
+		Start: position{Line: 2, Character: 0},
+		End:   position{Line: 2, Character: 5},
+	})
+
+	if action.Title != "Inline template" {
+		t.Fatalf("action title: got %q, want %q", action.Title, "Inline template")
+	}
+	if action.Kind != "refactor.inline" {
+		t.Fatalf("action kind: got %q, want %q", action.Kind, "refactor.inline")
+	}
+
+	edits := action.Edit.Changes[uri]
+	if len(edits) != 1 {
+		t.Fatalf("edit count: got %d, want 1", len(edits))
+	}
+	wantRange := lspRange{
+		Start: position{Line: 2, Character: 0},
+		End:   position{Line: 2, Character: 11},
+	}
+	if edits[0].Range != wantRange {
+		t.Fatalf("edit range: got %+v, want %+v", edits[0].Range, wantRange)
+	}
+	if edits[0].NewText != "echo Hello, Alice!" {
+		t.Fatalf("edit new text: got %q, want %q", edits[0].NewText, "echo Hello, Alice!")
+	}
+}
+
+func TestCodeActionInlineTemplateWithContinuationCall(t *testing.T) {
+	const uri = "file:///test.linebased"
+	doc := newDocument(uri, "define wrap tail\n\techo $tail\nwrap\n\tHello,\n\tworld\nnext\n")
+
+	action := inlineCodeAction(t, uri, doc, lspRange{
+		Start: position{Line: 2, Character: 0},
+		End:   position{Line: 2, Character: 4},
+	})
+
+	edits := action.Edit.Changes[uri]
+	if len(edits) != 1 {
+		t.Fatalf("edit count: got %d, want 1", len(edits))
+	}
+	wantRange := lspRange{
+		Start: position{Line: 2, Character: 0},
+		End:   position{Line: 4, Character: 6},
+	}
+	if edits[0].Range != wantRange {
+		t.Fatalf("edit range: got %+v, want %+v", edits[0].Range, wantRange)
+	}
+	if edits[0].NewText != "echo\nHello,\nworld" {
+		t.Fatalf("edit new text: got %q, want %q", edits[0].NewText, "echo\nHello,\nworld")
 	}
 }
 
@@ -544,12 +614,18 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-func hoverResponseValue(t *testing.T, msg []byte) string {
+func lspMessageBody(t *testing.T, msg []byte) []byte {
 	t.Helper()
 	_, body, ok := bytes.Cut(msg, []byte("\r\n\r\n"))
 	if !ok {
 		t.Fatalf("missing LSP header separator in %q", msg)
 	}
+	return body
+}
+
+func hoverResponseValue(t *testing.T, msg []byte) string {
+	t.Helper()
+	body := lspMessageBody(t, msg)
 	var resp struct {
 		Result struct {
 			Contents markupContent `json:"contents"`
@@ -559,6 +635,51 @@ func hoverResponseValue(t *testing.T, msg []byte) string {
 		t.Fatal(err)
 	}
 	return resp.Result.Contents.Value
+}
+
+type codeActionResult struct {
+	Title string `json:"title"`
+	Kind  string `json:"kind"`
+	Edit  struct {
+		Changes map[string][]struct {
+			Range   lspRange `json:"range"`
+			NewText string   `json:"newText"`
+		} `json:"changes"`
+	} `json:"edit"`
+}
+
+func inlineCodeAction(t *testing.T, uri string, doc *document, rng lspRange) codeActionResult {
+	t.Helper()
+	var out bytes.Buffer
+	s := &server{
+		w:    bufio.NewWriter(&out),
+		docs: map[string]*document{uri: doc},
+	}
+	params, err := json.Marshal(struct {
+		TextDocument textDocumentIdentifier `json:"textDocument"`
+		Range        lspRange               `json:"range"`
+	}{
+		TextDocument: textDocumentIdentifier{URI: uri},
+		Range:        rng,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handleCodeAction(&request{ID: json.RawMessage(`1`), Params: params}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := lspMessageBody(t, out.Bytes())
+	var resp struct {
+		Result []codeActionResult `json:"result"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Result) != 1 {
+		t.Fatalf("code actions: got %d, want 1", len(resp.Result))
+	}
+	return resp.Result[0]
 }
 
 func TestDefinitionFromInclude(t *testing.T) {

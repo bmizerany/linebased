@@ -43,8 +43,8 @@ if has('nvim')
       let b:undo_ftplugin .= '| silent! nunmap <buffer> K'
     endif
     if !hasmapto('<Plug>(linebased-inline)')
-      nmap <buffer> gri <Plug>(linebased-inline)
-      let b:undo_ftplugin .= '| silent! nunmap <buffer> gri'
+      nmap <buffer> grI <Plug>(linebased-inline)
+      let b:undo_ftplugin .= '| silent! nunmap <buffer> grI'
     endif
     if !hasmapto('<Plug>(linebased-rename)')
       nmap <buffer> rn <Plug>(linebased-rename)

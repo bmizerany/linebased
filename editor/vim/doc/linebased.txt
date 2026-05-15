@@ -7,7 +7,7 @@ INTRODUCTION                                    *linebased*
 
 This plugin provides filetype detection and syntax highlighting for linebased
 files (*.linebased). In Neovim, it also provides LSP integration for
-go-to-definition, hover, and other language features.
+go-to-definition, hover, references, rename, and inline expansion.
 
 Linebased is a line-oriented configuration format where each expression has
 a command name and body. Template definitions use `define`, file inclusion
@@ -53,7 +53,8 @@ The following |<Plug>| mappings are provided (Neovim only):
 
                                         *<Plug>(linebased-inline)*
 <Plug>(linebased-inline)        Inline template. Replace the template call
-                                under the cursor with its expanded content.
+                                under the cursor with its expanded content via
+                                the refactor.inline code action.
 
                                         *<Plug>(linebased-rename)*
 <Plug>(linebased-rename)        Rename template. Rename the template under
@@ -65,7 +66,7 @@ a mapping to the <Plug> already exists:
         gd      <Plug>(linebased-definition)
         gD      <Plug>(linebased-type-definition)
         K       <Plug>(linebased-hover)
-        gri     <Plug>(linebased-inline)
+        grI     <Plug>(linebased-inline)
         rn      <Plug>(linebased-rename)
 
 To use different keys, map them in ~/.vim/after/ftplugin/linebased.vim:

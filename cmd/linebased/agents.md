@@ -89,7 +89,8 @@ The language server (`linebased lsp`) provides:
 - **Go to Definition**: Jump from template calls to definitions
 - **Find References**: Locate all uses of a template
 - **Rename**: Rename templates across files
-- **Inline**: Replace a template call with its expansion
+- **Inline**: Replace a template call with its expansion using the
+  `refactor.inline` code action
 
 ## Workflow Tips
 

@@ -564,12 +564,7 @@ func (s *server) handleCodeAction(msg *request) error {
 		return s.reply(msg.ID, []any{})
 	}
 
-	// Calculate the range of the entire expression line
-	lineLen := 0
-	if info.line < len(doc.lines) {
-		lineLen = utf16Len(doc.lines[info.line])
-	}
-	exprRange := span{info.line, 0, info.line, lineLen}.toLSP()
+	exprRange := doc.exprRange(info)
 
 	// Build the code action with workspace edit
 	action := struct {
@@ -724,7 +719,7 @@ func (s *server) reply(id json.RawMessage, result any) error {
 	data, err := json.Marshal(struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
-		Result  any             `json:"result,omitempty"`
+		Result  any             `json:"result"`
 	}{JSONRPC: "2.0", ID: id, Result: result})
 	if err != nil {
 		return err
@@ -736,7 +731,7 @@ func (s *server) replyRaw(id json.RawMessage, result json.RawMessage) error {
 	data, err := json.Marshal(struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
-		Result  json.RawMessage `json:"result,omitempty"`
+		Result  json.RawMessage `json:"result"`
 	}{JSONRPC: "2.0", ID: id, Result: result})
 	if err != nil {
 		return err
@@ -1116,6 +1111,15 @@ func (d *document) exprAt(line int) (exprInfo, bool) {
 	return exprInfo{}, false
 }
 
+func (d *document) exprRange(info exprInfo) lspRange {
+	lastLine := info.line + strings.Count(strings.TrimSuffix(info.expr.Body, "\n"), "\n")
+	lineLen := 0
+	if lastLine >= 0 && lastLine < len(d.lines) {
+		lineLen = utf16Len(d.lines[lastLine])
+	}
+	return span{info.line, 0, lastLine, lineLen}.toLSP()
+}
+
 // expandTrace returns the expanded output for the given template call.
 // It creates an in-memory linebased file with the template definition and call,
 // then expands it and returns just the expanded expressions (not the call itself).
@@ -1139,13 +1143,8 @@ func (d *document) expandTrace(name, args string, def definition) string {
 			}
 		}
 	}
-	// Add the call
-	script.WriteString(name)
-	if args != "" {
-		script.WriteString(" ")
-		script.WriteString(strings.TrimSuffix(args, "\n"))
-	}
-	script.WriteString("\n")
+	// Add the call.
+	writeLinebasedExpr(&script, name, args)
 
 	// Expand and capture output (just the expanded expressions)
 	fsys := fstest.MapFS{
@@ -1169,6 +1168,30 @@ func (d *document) expandTrace(name, args string, def definition) string {
 	}
 
 	return out.String()
+}
+
+func writeLinebasedExpr(b *strings.Builder, name, body string) {
+	b.WriteString(name)
+	body = strings.TrimSuffix(body, "\n")
+	if body == "" {
+		b.WriteString("\n")
+		return
+	}
+
+	head, tail, multiline := strings.Cut(body, "\n")
+	if head != "" {
+		b.WriteByte(' ')
+		b.WriteString(strings.TrimLeftFunc(head, unicode.IsSpace))
+	}
+	b.WriteByte('\n')
+	if !multiline {
+		return
+	}
+	for _, line := range strings.Split(tail, "\n") {
+		b.WriteByte('\t')
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
 }
 
 // refLocation combines a span with a URI for cross-file references.

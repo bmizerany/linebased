@@ -147,4 +147,16 @@ end
 lspconfig.linebased.setup({})
 ```
 
-You'll get diagnostics, hovers, and jump-to-definition for `.linebased` files.
+You'll get diagnostics, hovers, jump-to-definition, references, rename, and
+inline expansion for `.linebased` files. The inline action is exposed as the
+`refactor.inline` code action and replaces a template call with its expanded
+content.
+
+The bundled Vim plugin also starts the language server automatically when the
+`linebased` command is on `PATH`:
+
+```lua
+vim.opt.runtimepath:prepend(vim.fn.expand("~/src/linebased/editor/vim"))
+```
+
+Its default Neovim mapping for inline expansion is `grI`.
